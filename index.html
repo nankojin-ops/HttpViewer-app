@@ -1,0 +1,893 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>HTML Viewer & Search</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Google API Loader for Google Picker -->
+  <script src="https://apis.google.com/js/api.js"></script>
+  <style>
+    /* カスタムスクロールバー */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #f1f5f9;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+    }
+    /* モバイルブラウザでの慣性スクロール */
+    .touch-scroll {
+      -webkit-overflow-scrolling: touch;
+    }
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-800 h-screen flex flex-col font-sans overflow-hidden">
+
+  <!-- ヘッダー -->
+  <header class="bg-white border-b border-slate-200 px-4 py-2.5 sm:px-6 sm:py-3 flex items-center justify-between shadow-sm z-20 flex-shrink-0">
+    <div class="flex items-center gap-2 sm:gap-3 overflow-hidden">
+      <div class="bg-blue-600 text-white p-2 rounded-lg shadow-sm flex-shrink-0">
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+        </svg>
+      </div>
+      <div class="min-w-0">
+        <h1 class="text-base sm:text-lg font-bold text-slate-900 leading-tight truncate">HTML Viewer</h1>
+        <!-- フォルダ選択インジケーター & 切り替えトリガー -->
+        <button 
+          id="changeFolderBtn"
+          type="button"
+          class="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1 font-medium truncate max-w-[180px] sm:max-w-xs transition-colors"
+          title="フォルダを切り替える"
+        >
+          <svg class="w-3.5 h-3.5 flex-shrink-0 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+          </svg>
+          <span id="currentFolderName" class="truncate">フォルダ読み込み中...</span>
+          <svg class="w-3 h-3 flex-shrink-0 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+      </div>
+    </div>
+    
+    <div class="flex items-center gap-2 flex-shrink-0">
+      <div id="statusBadge" class="text-xs px-2 sm:px-2.5 py-1 rounded-full bg-slate-100 text-slate-600 border border-slate-200 flex items-center gap-1.5">
+        <span class="w-2 h-2 rounded-full bg-slate-400"></span>
+        <span class="hidden sm:inline">初期化中</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- メインレイアウト（PC: 2ペイン / スマホ: 画面排他切り替え） -->
+  <div class="flex-1 flex overflow-hidden relative">
+      
+    <!-- 左ペイン：検索・ファイル一覧 -->
+    <aside 
+      id="listPane" 
+      class="w-full md:w-80 lg:w-96 bg-white border-r border-slate-200 flex flex-col flex-shrink-0 shadow-sm z-10 transition-all duration-200"
+    >
+      <!-- 検索入力エリア -->
+      <div class="p-3 sm:p-4 border-b border-slate-200 bg-slate-50/50 flex-shrink-0">
+        <div class="relative">
+          <input 
+            type="text" 
+            id="searchInput" 
+            placeholder="ファイル名・本文を検索..." 
+            class="w-full pl-9 pr-9 py-2 text-sm bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all shadow-sm"
+          >
+          <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+          </div>
+          <button 
+            id="clearSearchBtn" 
+            class="hidden absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 h-full"
+            title="検索をクリア"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <div class="mt-2 flex items-center justify-between text-xs text-slate-500 px-1">
+          <span id="fileCountText">読み込み中...</span>
+          <button id="refreshBtn" class="hover:text-blue-600 flex items-center gap-1 transition-colors py-1 px-1.5 rounded active:bg-slate-200" title="再読み込み">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            更新
+          </button>
+        </div>
+      </div>
+
+      <!-- ファイル一覧リスト -->
+      <div id="fileListContainer" class="flex-1 overflow-y-auto touch-scroll divide-y divide-slate-100">
+        <!-- JSで動的にアイテムを挿入 -->
+      </div>
+    </aside>
+
+    <!-- 右ペイン：プレビュー表示エリア -->
+    <main 
+      id="previewPane" 
+      class="hidden md:flex flex-1 flex-col bg-slate-200 overflow-hidden relative z-0"
+    >
+      <!-- プレビューコントロールバー -->
+      <div id="previewHeader" class="bg-white border-b border-slate-200 px-4 py-2 sm:px-6 sm:py-2.5 flex items-center justify-between shadow-sm flex-shrink-0">
+        <div class="flex items-center gap-2 overflow-hidden">
+          <!-- スマホ用：一覧へ戻るボタン -->
+          <button 
+            id="backToListBtn" 
+            class="md:hidden flex items-center gap-1 text-xs font-semibold text-blue-600 hover:text-blue-800 bg-blue-50 active:bg-blue-100 px-2.5 py-1.5 rounded transition-colors"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+            </svg>
+            一覧
+          </button>
+          <span class="text-xs font-semibold uppercase tracking-wider text-slate-400 hidden sm:inline">Preview</span>
+          <span class="text-slate-300 hidden sm:inline">|</span>
+          <h2 id="currentFileName" class="text-sm font-medium text-slate-700 truncate">ファイルが選択されていません</h2>
+        </div>
+        
+        <div id="previewActions" class="hidden flex items-center gap-2 flex-shrink-0">
+          <button id="reloadPreviewBtn" class="text-xs px-2.5 py-1.5 text-slate-600 hover:bg-slate-100 active:bg-slate-200 rounded border border-slate-200 transition-colors flex items-center gap-1">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            再読込
+          </button>
+        </div>
+      </div>
+
+      <!-- プレビュー本体フレーム -->
+      <div class="flex-1 relative overflow-hidden bg-white">
+        <!-- 空白時のプレースホルダー -->
+        <div id="emptyState" class="absolute inset-0 flex flex-col items-center justify-center text-slate-400 p-8 text-center bg-slate-50">
+          <div class="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center mb-4 text-slate-300">
+            <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+            </svg>
+          </div>
+          <h3 class="text-base font-medium text-slate-600 mb-1">プレビューするファイルを選択</h3>
+          <p class="text-xs text-slate-400 max-w-sm">ファイルを選択すると、ここに内容がプレビュー表示されます。</p>
+        </div>
+
+        <!-- ローディングオーバーレイ -->
+        <div id="previewLoading" class="hidden absolute inset-0 bg-white/80 backdrop-blur-sm flex flex-col items-center justify-center z-10">
+          <div class="animate-spin rounded-full h-8 w-8 border-2 border-blue-600 border-t-transparent mb-3"></div>
+          <p class="text-xs font-medium text-slate-600">HTMLを読み込み中...</p>
+        </div>
+
+        <!-- プレビュー用 iframe -->
+        <iframe 
+          id="previewFrame" 
+          class="w-full h-full border-0" 
+          sandbox="allow-scripts allow-forms allow-same-origin"
+        ></iframe>
+      </div>
+    </main>
+
+  </div>
+
+  <!-- 手動フォルダID入力モーダル（Picker失敗時・手動指定用フォールバック） -->
+  <div id="manualFolderModal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm hidden flex items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-xl shadow-xl max-w-md w-full p-5 sm:p-6">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-base font-bold text-slate-800">フォルダの切り替え</h3>
+        <button id="closeModalBtn" class="text-slate-400 hover:text-slate-600">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+      <p class="text-xs text-slate-500 mb-4">
+        閲覧したいGoogleドライブのフォルダID、またはフォルダURLを直接入力してください。
+      </p>
+      <input 
+        type="text" 
+        id="folderIdInput" 
+        placeholder="フォルダID または URL を入力" 
+        class="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 mb-4"
+      >
+      <div class="flex items-center justify-end gap-2">
+        <button 
+          id="cancelModalBtn" 
+          type="button" 
+          class="px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+        >
+          キャンセル
+        </button>
+        <button 
+          id="submitFolderBtn" 
+          type="button" 
+          class="px-4 py-2 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 rounded-lg transition-colors shadow-sm"
+        >
+          フォルダを適用
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- エラートースト通知 -->
+  <div id="toast" class="fixed bottom-4 right-4 left-4 sm:left-auto max-w-md bg-rose-600 text-white text-xs px-4 py-3 rounded-lg shadow-lg hidden flex items-start gap-3 z-50 transition-all duration-300">
+    <svg class="w-4 h-4 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+    <div class="flex-1">
+      <p class="font-semibold" id="toastTitle">エラー</p>
+      <p id="toastMessage" class="mt-0.5 text-rose-100"></p>
+    </div>
+    <button onclick="hideToast()" class="text-rose-200 hover:text-white">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+      </svg>
+    </button>
+  </div>
+
+  <!-- サーバーサイドテンプレートから注入された初期パラメータ -->
+  <script>
+    const SERVER_URL_FOLDER_ID = '<?= typeof urlFolderId !== "undefined" ? urlFolderId : "" ?>';
+  </script>
+
+  <!-- フロントエンド制御スクリプト -->
+  <script>
+    /**
+     * window.localStorage を try-catch で保護した安全なストレージアダプター
+     */
+    const SafeStorage = {
+      get: function(key) {
+        try {
+          if (typeof window !== 'undefined' && window.localStorage) {
+            return window.localStorage.getItem(key);
+          }
+        } catch (e) {
+          console.warn('[SafeStorage] getItem failed for key:', key, e);
+        }
+        return null;
+      },
+      set: function(key, value) {
+        try {
+          if (typeof window !== 'undefined' && window.localStorage) {
+            window.localStorage.setItem(key, value);
+            return true;
+          }
+        } catch (e) {
+          console.warn('[SafeStorage] setItem failed for key:', key, e);
+        }
+        return false;
+      },
+      remove: function(key) {
+        try {
+          if (typeof window !== 'undefined' && window.localStorage) {
+            window.localStorage.removeItem(key);
+            return true;
+          }
+        } catch (e) {
+          console.warn('[SafeStorage] removeItem failed for key:', key, e);
+        }
+        return false;
+      }
+    };
+
+    /**
+     * クライアント側 window.location.search から folderId または f を抽出（フォールバック用）
+     * @return {string}
+     */
+    function getClientUrlFolderId() {
+      try {
+        if (typeof window !== 'undefined' && window.location && window.location.search) {
+          const params = new URLSearchParams(window.location.search);
+          const fid = params.get('folderId') || params.get('f') || '';
+          return fid.trim();
+        }
+      } catch (e) {
+        console.warn('[getClientUrlFolderId] URLSearchParams parse error:', e);
+      }
+      return '';
+    }
+
+    /**
+     * フォルダIDの優先順位（URL > UserProperties > localStorage > defaultFolderId）を解決する
+     * @param {Object} sources 参照可能なフォルダID群
+     * @param {string|null} sources.urlParam URLクエリパラメータ由来
+     * @param {string|null} sources.userProp サーバー側UserProperties由来
+     * @param {string|null} sources.localStore localStorage由来
+     * @param {string|null} sources.defaultProp スクリプトデフォルト由来
+     * @return {Object} { folderId: string, source: 'URL' | 'USER_PROPERTIES' | 'LOCAL_STORAGE' | 'DEFAULT' | 'NONE' }
+     */
+    function resolveInitialFolderId(sources) {
+      if (sources.urlParam && sources.urlParam.trim() !== '') {
+        return { folderId: sources.urlParam.trim(), source: 'URL' };
+      }
+      if (sources.userProp && sources.userProp.trim() !== '') {
+        return { folderId: sources.userProp.trim(), source: 'USER_PROPERTIES' };
+      }
+      if (sources.localStore && sources.localStore.trim() !== '') {
+        return { folderId: sources.localStore.trim(), source: 'LOCAL_STORAGE' };
+      }
+      if (sources.defaultProp && sources.defaultProp.trim() !== '') {
+        return { folderId: sources.defaultProp.trim(), source: 'DEFAULT' };
+      }
+      return { folderId: '', source: 'NONE' };
+    }
+
+    // 状態管理
+    const STORAGE_KEY_FOLDER_ID = 'html_viewer_last_folder_id';
+    let appConfig = null;
+    let currentFolderId = '';
+    let isPickerApiLoaded = false;
+    let activeFileId = null;
+    let currentRawHtml = '';
+    let currentRequestId = 0;
+    let searchDebounceTimer = null;
+    let currentMobileView = 'list'; // 'list' | 'preview'
+    let hasAttemptedFallback = false;
+    let saveLastFolderIdRequestId = 0;
+
+    // DOM要素の参照
+    const listPane = document.getElementById('listPane');
+    const previewPane = document.getElementById('previewPane');
+    const backToListBtn = document.getElementById('backToListBtn');
+    const changeFolderBtn = document.getElementById('changeFolderBtn');
+    const currentFolderName = document.getElementById('currentFolderName');
+    const searchInput = document.getElementById('searchInput');
+    const clearSearchBtn = document.getElementById('clearSearchBtn');
+    const fileListContainer = document.getElementById('fileListContainer');
+    const fileCountText = document.getElementById('fileCountText');
+    const refreshBtn = document.getElementById('refreshBtn');
+    const currentFileName = document.getElementById('currentFileName');
+    const previewActions = document.getElementById('previewActions');
+    const previewFrame = document.getElementById('previewFrame');
+    const emptyState = document.getElementById('emptyState');
+    const previewLoading = document.getElementById('previewLoading');
+    const reloadPreviewBtn = document.getElementById('reloadPreviewBtn');
+    const statusBadge = document.getElementById('statusBadge');
+
+    // モーダル要素
+    const manualFolderModal = document.getElementById('manualFolderModal');
+    const folderIdInput = document.getElementById('folderIdInput');
+    const closeModalBtn = document.getElementById('closeModalBtn');
+    const cancelModalBtn = document.getElementById('cancelModalBtn');
+    const submitFolderBtn = document.getElementById('submitFolderBtn');
+
+    /**
+     * トースト通知
+     */
+    function showErrorToast(title, message) {
+      document.getElementById('toastTitle').textContent = title;
+      document.getElementById('toastMessage').textContent = message;
+      const toast = document.getElementById('toast');
+      toast.classList.remove('hidden');
+      setTimeout(function() {
+        hideToast();
+      }, 7000);
+    }
+
+    function hideToast() {
+      document.getElementById('toast').classList.add('hidden');
+    }
+
+    /**
+     * ステータスバッジの更新
+     */
+    function setStatus(text, colorClass) {
+      statusBadge.innerHTML = '<span class="w-2 h-2 rounded-full ' + colorClass + '"></span><span class="hidden sm:inline">' + text + '</span>';
+    }
+
+    /**
+     * モバイル用ビュー切り替え
+     */
+    function switchMobileView(view) {
+      currentMobileView = view;
+      if (window.innerWidth < 768) {
+        if (view === 'preview') {
+          listPane.classList.add('hidden');
+          previewPane.classList.remove('hidden');
+          previewPane.classList.add('flex', 'w-full');
+        } else {
+          previewPane.classList.add('hidden');
+          previewPane.classList.remove('flex', 'w-full');
+          listPane.classList.remove('hidden');
+        }
+      } else {
+        // デスクトップ表示
+        listPane.classList.remove('hidden');
+        previewPane.classList.remove('hidden');
+        previewPane.classList.add('flex');
+      }
+    }
+
+    /**
+     * バイト数フォーマット
+     */
+    function formatBytes(bytes) {
+      if (!bytes || bytes === 0) return '0 B';
+      const k = 1024;
+      const sizes = ['B', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+    }
+
+    /**
+     * 文字列エスケープ
+     */
+    function escapeHtml(str) {
+      if (!str) return '';
+      return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    /**
+     * ファイル一覧の描画
+     */
+    function renderFileList(files) {
+      fileListContainer.innerHTML = '';
+        
+      if (!files || files.length === 0) {
+        fileCountText.textContent = '0 件のファイル';
+        fileListContainer.innerHTML = 
+          '<div class="p-8 text-center text-slate-400 text-xs">' +
+            '<p class="mb-1">一致するHTMLファイルが見つかりません</p>' +
+            '<p class="text-slate-300">検索ワードまたはフォルダをご確認ください</p>' +
+          '</div>';
+        return;
+      }
+
+      fileCountText.textContent = files.length + ' 件のファイル';
+
+      files.forEach(function(file) {
+        const item = document.createElement('div');
+        const isActive = (file.id === activeFileId);
+        item.className = 'p-3 cursor-pointer transition-colors border-l-4 ' + 
+          (isActive 
+            ? 'bg-blue-50/70 border-blue-600 text-blue-950 font-medium' 
+            : 'border-transparent hover:bg-slate-50 active:bg-slate-100 text-slate-700');
+
+        item.innerHTML = 
+          '<div class="flex items-start justify-between gap-2">' +
+            '<h3 class="text-sm font-medium leading-snug break-all line-clamp-2">' + escapeHtml(file.name) + '</h3>' +
+          '</div>' +
+          '<div class="mt-1 flex items-center gap-3 text-xs text-slate-400">' +
+            '<span>' + formatBytes(file.size) + '</span>' +
+            '<span>&bull;</span>' +
+            '<span>' + file.updated + '</span>' +
+          '</div>';
+
+        item.addEventListener('click', function() {
+          selectFile(file);
+        });
+
+        fileListContainer.appendChild(item);
+      });
+    }
+
+    /**
+     * ファイル選択
+     */
+    function selectFile(file) {
+      activeFileId = file.id;
+
+      // リスト選択スタイルの更新
+      document.querySelectorAll('#fileListContainer > div').forEach(function(node) {
+        node.classList.remove('bg-blue-50/70', 'border-blue-600', 'text-blue-950', 'font-medium');
+        node.classList.add('border-transparent', 'hover:bg-slate-50', 'text-slate-700');
+      });
+
+      currentFileName.textContent = file.name;
+      previewActions.classList.remove('hidden');
+      emptyState.classList.add('hidden');
+      previewLoading.classList.remove('hidden');
+      setStatus('読み込み中...', 'bg-amber-500 animate-pulse');
+
+      // モバイルの場合はプレビュービューへ画面遷移
+      switchMobileView('preview');
+
+      google.script.run
+        .withSuccessHandler(function(response) {
+          previewLoading.classList.add('hidden');
+          if (response.success) {
+            currentRawHtml = response.content;
+            previewFrame.srcdoc = currentRawHtml;
+            setStatus('表示中', 'bg-emerald-500');
+          } else {
+            showErrorToast('読み込み失敗', response.error);
+            setStatus('エラー', 'bg-rose-500');
+          }
+        })
+        .withFailureHandler(function(err) {
+          previewLoading.classList.add('hidden');
+          showErrorToast('通信エラー', err.message);
+          setStatus('エラー', 'bg-rose-500');
+        })
+        .getHtmlFileContent(file.id);
+    }
+
+    /**
+     * フォルダアクセス失敗時の自己修復と安全なフォールバック処理
+     * @param {string} failedFolderId アクセスに失敗したフォルダID
+     * @param {string} [errorMessage] エラーメッセージ
+     */
+    function handleFolderLoadError(failedFolderId, errorMessage) {
+      console.warn('[handleFolderLoadError] Folder access failed for ID:', failedFolderId, errorMessage);
+
+      // 無効なフォルダ情報をクライアントとサーバーの両方から即座に削除
+      SafeStorage.remove(STORAGE_KEY_FOLDER_ID);
+      google.script.run
+        .withSuccessHandler(function() {})
+        .withFailureHandler(function(err) {
+          console.warn('[handleFolderLoadError] clearLastFolderId failed:', err.message);
+        })
+        .clearLastFolderId();
+
+      const defaultFolderId = appConfig && appConfig.defaultFolderId ? appConfig.defaultFolderId.trim() : '';
+
+      // デフォルトフォルダが存在し、未試行かつ失敗したフォルダと異なる場合に安全にフォールバック
+      if (!hasAttemptedFallback && defaultFolderId && defaultFolderId !== failedFolderId) {
+        hasAttemptedFallback = true;
+        showErrorToast(
+          '前回フォルダ復元エラー',
+          '前回開いていたフォルダにアクセスできないため、デフォルトフォルダへ切り替えます。'
+        );
+        currentFolderId = defaultFolderId;
+        executeSearch('');
+      } else {
+        // フォールバック先がない、またはすでにフォールバック試行済みの場合は無限ループを防止して停止
+        showErrorToast('フォルダエラー', errorMessage || 'フォルダが存在しないか、アクセス権限がありません。');
+        currentFolderName.textContent = 'フォルダを選択';
+        setStatus('エラー', 'bg-rose-500');
+        fileCountText.textContent = 'フォルダを選択してください';
+        renderFileList([]);
+        openGooglePicker();
+      }
+    }
+
+    /**
+     * ファイル一覧・検索の実行
+     */
+    function executeSearch(query) {
+      const requestId = ++currentRequestId;
+      setStatus('検索中...', 'bg-blue-500 animate-pulse');
+      fileCountText.textContent = '読み込み中...';
+
+      const handler = function(response) {
+        if (requestId !== currentRequestId) return;
+
+        if (response.success) {
+          renderFileList(response.data);
+          if (response.folder && response.folder.name) {
+            currentFolderName.textContent = response.folder.name;
+          }
+          setStatus('準備完了', 'bg-emerald-500');
+        } else {
+          // フォルダが存在しない・権限がない・無効形式等の重大エラーの場合は自己修復へルーティング
+          if (response.error && (
+            response.error.includes('指定されたフォルダ') ||
+            response.error.includes('ゴミ箱') ||
+            response.error.includes('無効なフォルダID形式') ||
+            response.error.includes('フォルダID形式が無効') ||
+            response.error.includes('フォルダIDが指定されていません') ||
+            response.error.includes('対象フォルダが指定されていません')
+          )) {
+            handleFolderLoadError(currentFolderId, response.error);
+          } else {
+            showErrorToast('読み込みエラー', response.error);
+            setStatus('エラー', 'bg-rose-500');
+            fileCountText.textContent = 'エラー';
+          }
+        }
+      };
+
+      const errorHandler = function(err) {
+        if (requestId !== currentRequestId) return;
+        showErrorToast('通信エラー', err.message);
+        setStatus('エラー', 'bg-rose-500');
+        fileCountText.textContent = 'エラー';
+      };
+
+      if (!query || query.trim() === '') {
+        google.script.run
+          .withSuccessHandler(handler)
+          .withFailureHandler(errorHandler)
+          .getHtmlFileList(currentFolderId);
+      } else {
+        google.script.run
+          .withSuccessHandler(handler)
+          .withFailureHandler(errorHandler)
+          .searchHtmlFiles(query, currentFolderId);
+      }
+    }
+
+    /**
+     * フォルダの適用と永続化
+     */
+    function applyFolder(folderId, folderName) {
+      currentFolderId = folderId;
+
+      // クライアント側ストレージに安全に保存
+      SafeStorage.set(STORAGE_KEY_FOLDER_ID, folderId);
+
+      // サーバー側ユーザープロパティへ非ブロッキングで非同期保存（シーケンス制御付き）
+      const currentSaveId = ++saveLastFolderIdRequestId;
+      google.script.run
+        .withSuccessHandler(function(res) {
+          if (currentSaveId !== saveLastFolderIdRequestId) {
+            return;
+          }
+          if (!res || !res.success) {
+            console.warn('[applyFolder] saveLastFolderId failed on server:', res ? res.error : 'Unknown');
+          }
+        })
+        .withFailureHandler(function(err) {
+          if (currentSaveId !== saveLastFolderIdRequestId) return;
+          console.warn('[applyFolder] saveLastFolderId network error:', err.message);
+        })
+        .saveLastFolderId(folderId);
+
+      if (folderName) {
+        currentFolderName.textContent = folderName;
+      } else {
+        currentFolderName.textContent = '読み込み中...';
+      }
+
+      // 検索状態をクリアして新規フォルダのファイルを読み込む
+      searchInput.value = '';
+      clearSearchBtn.classList.add('hidden');
+      activeFileId = null;
+      previewFrame.srcdoc = '';
+      currentFileName.textContent = 'ファイルが選択されていません';
+      previewActions.classList.add('hidden');
+      emptyState.classList.remove('hidden');
+
+      switchMobileView('list');
+      executeSearch('');
+    }
+
+    /**
+     * Google Picker ダイアログの初期化と表示
+     */
+    function openGooglePicker() {
+      if (!isPickerApiLoaded || !appConfig || !appConfig.apiKey) {
+        openManualFolderModal();
+        return;
+      }
+
+      try {
+        // フォルダ選択専用ビューの定義
+        const view = new google.picker.DocsView(google.picker.ViewId.FOLDERS)
+          .setSelectFolderEnabled(true);
+
+        const dialogWidth = Math.min(window.innerWidth * 0.92, 800);
+        const dialogHeight = Math.min(window.innerHeight * 0.85, 600);
+
+        const builder = new google.picker.PickerBuilder()
+          .addView(view)
+          .setOAuthToken(appConfig.token)
+          .setDeveloperKey(appConfig.apiKey)
+          .setAppId(appConfig.projectNumber || '')
+          .setSize(dialogWidth, dialogHeight)
+          .setLocale('ja');
+
+        // GASのiframe環境ではOriginの指定が必須
+        if (google && google.script && google.script.host && google.script.host.origin) {
+          builder.setOrigin(google.script.host.origin);
+        }
+
+        builder.setCallback(function(data) {
+          if (data[google.picker.Response.ACTION] === google.picker.Action.PICKED) {
+            const doc = data[google.picker.Response.DOCUMENTS][0];
+            const folderId = doc[google.picker.Document.ID];
+            const folderName = doc[google.picker.Document.NAME];
+            applyFolder(folderId, folderName);
+          }
+        });
+
+        const picker = builder.build();
+        picker.setVisible(true);
+      } catch (err) {
+        console.warn('Picker開閉エラー、手動モーダルへフォールバックします:', err);
+        openManualFolderModal();
+      }
+    }
+
+    /**
+     * 手動入力モーダルの制御
+     */
+    function openManualFolderModal() {
+      folderIdInput.value = currentFolderId;
+      manualFolderModal.classList.remove('hidden');
+      setTimeout(function() {
+        folderIdInput.focus();
+      }, 100);
+    }
+
+    function closeManualFolderModal() {
+      manualFolderModal.classList.add('hidden');
+    }
+
+    function submitManualFolder() {
+      const val = folderIdInput.value.trim();
+      if (!val) {
+        showErrorToast('入力エラー', 'フォルダIDまたはURLを入力してください。');
+        return;
+      }
+
+      setStatus('検証中...', 'bg-blue-500 animate-pulse');
+      google.script.run
+        .withSuccessHandler(function(res) {
+          if (res.success) {
+            closeManualFolderModal();
+            applyFolder(res.folder.id, res.folder.name);
+          } else {
+            showErrorToast('指定エラー', res.error);
+            setStatus('エラー', 'bg-rose-500');
+          }
+        })
+        .withFailureHandler(function(err) {
+          showErrorToast('通信エラー', err.message);
+          setStatus('エラー', 'bg-rose-500');
+        })
+        .getFolderDetails(val);
+    }
+
+    /**
+     * アプリ初期化フロー
+     */
+    function initializeApp() {
+      setStatus('初期化中...', 'bg-blue-500 animate-pulse');
+
+      // Google Picker APIライブラリのロード
+      if (typeof gapi !== 'undefined') {
+        gapi.load('picker', {
+          callback: function() {
+            isPickerApiLoaded = true;
+          },
+          onerror: function() {
+            isPickerApiLoaded = false;
+          }
+        });
+      }
+
+      // GAS設定値の取得
+      google.script.run
+        .withSuccessHandler(function(config) {
+          appConfig = config;
+
+          // URLパラメータ（テンプレート注入優先、window.locationフォールバック）
+          const effectiveUrlFolderId = (SERVER_URL_FOLDER_ID && SERVER_URL_FOLDER_ID.trim() !== '')
+            ? SERVER_URL_FOLDER_ID.trim()
+            : getClientUrlFolderId();
+
+          // カスケード解決（URL > UserProperties > localStorage > デフォルト）
+          const resolution = resolveInitialFolderId({
+            urlParam: effectiveUrlFolderId,
+            userProp: config.lastFolderId,
+            localStore: SafeStorage.get(STORAGE_KEY_FOLDER_ID),
+            defaultProp: config.defaultFolderId
+          });
+
+          if (!resolution.folderId) {
+            currentFolderName.textContent = 'フォルダを選択';
+            setStatus('フォルダ未設定', 'bg-amber-500');
+            fileCountText.textContent = 'フォルダを選択してください';
+            // フォルダが未設定の場合は自動でフォルダ切り替えを開く
+            openGooglePicker();
+            return;
+          }
+
+          currentFolderId = resolution.folderId;
+
+          // 初期フォルダの有効性検証 & ファイル取得
+          google.script.run
+            .withSuccessHandler(function(response) {
+              if (response.success) {
+                renderFileList(response.data);
+                if (response.folder && response.folder.name) {
+                  currentFolderName.textContent = response.folder.name;
+                }
+                // 有効性が確認されたフォルダを永続化（URLまたはlocalStorage由来の場合も同期）
+                SafeStorage.set(STORAGE_KEY_FOLDER_ID, currentFolderId);
+                if (resolution.source === 'URL' || resolution.source === 'LOCAL_STORAGE') {
+                  google.script.run
+                    .withSuccessHandler(function() {})
+                    .withFailureHandler(function() {})
+                    .saveLastFolderId(currentFolderId);
+                }
+                setStatus('準備完了', 'bg-emerald-500');
+              } else {
+                handleFolderLoadError(currentFolderId, response.error);
+              }
+            })
+            .withFailureHandler(function(err) {
+              showErrorToast('通信エラー', 'フォルダの読み込み中に通信エラーが発生しました。ネットワーク接続を確認し、再読み込みをお試しください。');
+              setStatus('通信エラー', 'bg-rose-500');
+              fileCountText.textContent = '通信エラー';
+            })
+            .getHtmlFileList(currentFolderId);
+        })
+        .withFailureHandler(function(err) {
+          showErrorToast('初期化エラー', err.message);
+          setStatus('エラー', 'bg-rose-500');
+        })
+        .getAppConfig();
+    }
+
+    // イベントリスナーのバインド
+    changeFolderBtn.addEventListener('click', openGooglePicker);
+    closeModalBtn.addEventListener('click', closeManualFolderModal);
+    cancelModalBtn.addEventListener('click', closeManualFolderModal);
+    submitFolderBtn.addEventListener('click', submitManualFolder);
+
+    folderIdInput.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') {
+        submitManualFolder();
+      }
+    });
+
+    backToListBtn.addEventListener('click', function() {
+      switchMobileView('list');
+    });
+
+    searchInput.addEventListener('input', function(e) {
+      const val = e.target.value;
+      if (val.length > 0) {
+        clearSearchBtn.classList.remove('hidden');
+      } else {
+        clearSearchBtn.classList.add('hidden');
+      }
+
+      clearTimeout(searchDebounceTimer);
+      searchDebounceTimer = setTimeout(function() {
+        executeSearch(val);
+      }, 400);
+    });
+
+    clearSearchBtn.addEventListener('click', function() {
+      searchInput.value = '';
+      clearSearchBtn.classList.add('hidden');
+      executeSearch('');
+      searchInput.focus();
+    });
+
+    refreshBtn.addEventListener('click', function() {
+      executeSearch(searchInput.value);
+    });
+
+    reloadPreviewBtn.addEventListener('click', function() {
+      if (currentRawHtml) {
+        previewFrame.srcdoc = '';
+        setTimeout(function() {
+          previewFrame.srcdoc = currentRawHtml;
+        }, 50);
+      }
+    });
+
+    window.addEventListener('resize', function() {
+      if (window.innerWidth >= 768) {
+        listPane.classList.remove('hidden');
+        previewPane.classList.remove('hidden');
+        previewPane.classList.add('flex');
+      } else {
+        switchMobileView(currentMobileView);
+      }
+    });
+
+    // 起動開始
+    window.addEventListener('DOMContentLoaded', initializeApp);
+  </script>
+</body>
+</html>
