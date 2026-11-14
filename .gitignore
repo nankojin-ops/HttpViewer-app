@@ -2,9 +2,11 @@
 node_modules/
 package-lock.json
 
-# clasp 認証・個人設定（トークンおよびプロジェクトID保護）
+# 認証情報・ローカル検証用設定の誤コミット防止
 .clasprc.json
-.clasp.json
+.env
+.env.*
+config.local.js
 
 # OS・エディタ生成ファイル
 .DS_Store
