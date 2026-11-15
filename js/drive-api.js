@@ -16,6 +16,7 @@
   var sanitizeFolderId = FolderResolverMod.sanitizeFolderId;
 
   var DRIVE_FILES_API_BASE = 'https://www.googleapis.com/drive/v3/files';
+  var DRIVE_DRIVES_API_BASE = 'https://www.googleapis.com/drive/v3/drives';
   var DEFAULT_PAGE_SIZE = 1000;
   var DEFAULT_MAX_PAGES = 20;
 
@@ -215,6 +216,100 @@
           Authorization: 'Bearer ' + token
         }
       });
+    }
+
+    function isCancelledSignal(signal) {
+      return Boolean(signal && typeof signal.isCancelled === 'function' && signal.isCancelled());
+    }
+
+    function cancelledResult() {
+      return {
+        success: false,
+        cancelled: true,
+        error: 'リクエストがキャンセルされました。'
+      };
+    }
+
+    function invalidInputResult(message) {
+      return {
+        success: false,
+        errorCode: 'INVALID_INPUT',
+        error: message
+      };
+    }
+
+    function clampPageSize(rawValue, defaultVal, maxVal) {
+      if (typeof rawValue === 'number' && isFinite(rawValue)) {
+        return Math.max(1, Math.min(Math.floor(rawValue), maxVal));
+      }
+      return defaultVal;
+    }
+
+    function normalizeFolderItem(rawItem, fallbackDriveId, isSharedDrive) {
+      var item = rawItem || {};
+      return {
+        id: item.id,
+        name: item.name || '(名称未設定)',
+        driveId: item.driveId || fallbackDriveId || '',
+        isSharedDrive: Boolean(isSharedDrive)
+      };
+    }
+
+    /**
+     * フォルダブラウズ・検索系の単一ページ取得共通ヘルパー
+     * @param {string} url
+     * @param {string} contextLabel
+     * @param {{ isCancelled?: Function }} [signal]
+     * @param {Function} transformPayload
+     * @return {Promise<Object>}
+     */
+    function executeBrowseFetch(url, contextLabel, signal, transformPayload) {
+      if (isCancelledSignal(signal)) {
+        return Promise.resolve(cancelledResult());
+      }
+
+      var token = requireValidToken();
+      if (!token) {
+        return Promise.resolve(unauthorizedResult());
+      }
+
+      return executeFetch(url, token)
+        .then(function (response) {
+          if (isCancelledSignal(signal)) {
+            return cancelledResult();
+          }
+
+          if (!response.ok) {
+            return parseErrorJsonSafely(response).then(function (errBody) {
+              var mapped = mapDriveHttpError(response.status, errBody, contextLabel);
+              return {
+                success: false,
+                errorCode: mapped.errorCode,
+                error: mapped.error
+              };
+            });
+          }
+
+          return response.json().then(function (payload) {
+            if (isCancelledSignal(signal)) {
+              return cancelledResult();
+            }
+            var pageData = transformPayload(payload || {});
+            return {
+              success: true,
+              data: pageData,
+              items: pageData.items,
+              nextPageToken: pageData.nextPageToken
+            };
+          });
+        })
+        .catch(function (err) {
+          return {
+            success: false,
+            errorCode: 'NETWORK_ERROR',
+            error: contextLabel + 'の取得中に通信エラーが発生しました: ' + (err && err.message ? err.message : 'Network error')
+          };
+        });
     }
 
     /**
@@ -541,16 +636,184 @@
         });
     }
 
+    /**
+     * 指定空間・親フォルダ配下のサブフォルダ一覧を取得する（1ページ分）
+     * @param {Object} [params]
+     * @param {'MY_DRIVE'|'SHARED_DRIVES'|'SHARED_WITH_ME'} [params.space]
+     * @param {string} [params.parentId]
+     * @param {string} [params.driveId]
+     * @param {string} [params.pageToken]
+     * @param {number} [params.pageSize]
+     * @param {{ isCancelled?: Function }} [signal]
+     * @return {Promise<Object>}
+     */
+    function listSubfolders(params, signal) {
+      var p = params || {};
+      var space = p.space || 'MY_DRIVE';
+      var clampedSize = clampPageSize(p.pageSize, 100, 1000);
+      var urlParams = new URLSearchParams();
+      var query = '';
+      var fallbackDriveId = '';
+
+      if (space === 'MY_DRIVE') {
+        var myDriveParent = 'root';
+        if (p.parentId && p.parentId !== 'root') {
+          try {
+            myDriveParent = sanitizeFolderId(p.parentId);
+          } catch (err) {
+            return Promise.resolve(invalidInputResult(err.message));
+          }
+        }
+        query = "'" + myDriveParent + "' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false";
+      } else if (space === 'SHARED_DRIVES') {
+        if (!p.driveId || typeof p.driveId !== 'string' || p.driveId.trim() === '') {
+          return Promise.resolve(invalidInputResult('共有ドライブIDが指定されていません。'));
+        }
+        var cleanDriveId;
+        try {
+          cleanDriveId = sanitizeFolderId(p.driveId);
+        } catch (err) {
+          return Promise.resolve(invalidInputResult(err.message));
+        }
+
+        var driveParent = cleanDriveId;
+        if (p.parentId && p.parentId !== cleanDriveId) {
+          try {
+            driveParent = sanitizeFolderId(p.parentId);
+          } catch (err) {
+            return Promise.resolve(invalidInputResult(err.message));
+          }
+        }
+
+        fallbackDriveId = cleanDriveId;
+        query = "'" + driveParent + "' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false";
+        urlParams.set('corpora', 'drive');
+        urlParams.set('driveId', cleanDriveId);
+      } else if (space === 'SHARED_WITH_ME') {
+        if (p.parentId) {
+          var sharedParent;
+          try {
+            sharedParent = sanitizeFolderId(p.parentId);
+          } catch (err) {
+            return Promise.resolve(invalidInputResult(err.message));
+          }
+          query = "'" + sharedParent + "' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false";
+        } else {
+          query = "sharedWithMe = true and mimeType = 'application/vnd.google-apps.folder' and trashed = false";
+        }
+      } else {
+        return Promise.resolve(invalidInputResult('無効なフォルダ空間が指定されました。'));
+      }
+
+      urlParams.set('q', query);
+      urlParams.set('fields', 'nextPageToken,files(id,name,driveId)');
+      urlParams.set('orderBy', 'name');
+      urlParams.set('pageSize', String(clampedSize));
+      urlParams.set('supportsAllDrives', 'true');
+      urlParams.set('includeItemsFromAllDrives', 'true');
+      if (p.pageToken) {
+        urlParams.set('pageToken', String(p.pageToken));
+      }
+
+      var url = DRIVE_FILES_API_BASE + '?' + urlParams.toString();
+      return executeBrowseFetch(url, 'フォルダ一覧', signal, function (payload) {
+        var files = Array.isArray(payload.files) ? payload.files : [];
+        return {
+          items: files.map(function (f) {
+            return normalizeFolderItem(f, fallbackDriveId, false);
+          }),
+          nextPageToken: payload.nextPageToken ? String(payload.nextPageToken) : null
+        };
+      });
+    }
+
+    /**
+     * ユーザーがアクセス可能な共有ドライブ一覧を取得する（1ページ分）
+     * @param {Object} [params]
+     * @param {string} [params.pageToken]
+     * @param {number} [params.pageSize]
+     * @param {{ isCancelled?: Function }} [signal]
+     * @return {Promise<Object>}
+     */
+    function listSharedDrives(params, signal) {
+      var p = params || {};
+      var clampedSize = clampPageSize(p.pageSize, 100, 100);
+      var urlParams = new URLSearchParams();
+      urlParams.set('fields', 'nextPageToken,drives(id,name)');
+      urlParams.set('pageSize', String(clampedSize));
+      if (p.pageToken) {
+        urlParams.set('pageToken', String(p.pageToken));
+      }
+
+      var url = DRIVE_DRIVES_API_BASE + '?' + urlParams.toString();
+      return executeBrowseFetch(url, '共有ドライブ一覧', signal, function (payload) {
+        var drives = Array.isArray(payload.drives) ? payload.drives : [];
+        return {
+          items: drives.map(function (d) {
+            return normalizeFolderItem(d, d && d.id, true);
+          }),
+          nextPageToken: payload.nextPageToken ? String(payload.nextPageToken) : null
+        };
+      });
+    }
+
+    /**
+     * フォルダ名キーワードでフォルダを検索する（マイドライブ＋共有ドライブ横断）
+     * @param {Object} params
+     * @param {string} params.keyword
+     * @param {string} [params.pageToken]
+     * @param {number} [params.pageSize]
+     * @param {{ isCancelled?: Function }} [signal]
+     * @return {Promise<Object>}
+     */
+    function searchFolders(params, signal) {
+      var p = params || {};
+      var cleanKeyword = sanitizeSearchQuery(typeof p.keyword === 'string' ? p.keyword : '');
+      if (!cleanKeyword) {
+        return Promise.resolve(invalidInputResult('検索キーワードを入力してください。'));
+      }
+
+      var clampedSize = clampPageSize(p.pageSize, 100, 1000);
+      var query = "mimeType = 'application/vnd.google-apps.folder' and trashed = false and name contains '" + cleanKeyword + "'";
+
+      var urlParams = new URLSearchParams();
+      urlParams.set('q', query);
+      urlParams.set('fields', 'nextPageToken,files(id,name,driveId)');
+      urlParams.set('corpora', 'allDrives');
+      urlParams.set('orderBy', 'name');
+      urlParams.set('pageSize', String(clampedSize));
+      urlParams.set('supportsAllDrives', 'true');
+      urlParams.set('includeItemsFromAllDrives', 'true');
+      if (p.pageToken) {
+        urlParams.set('pageToken', String(p.pageToken));
+      }
+
+      var url = DRIVE_FILES_API_BASE + '?' + urlParams.toString();
+      return executeBrowseFetch(url, 'フォルダ検索', signal, function (payload) {
+        var files = Array.isArray(payload.files) ? payload.files : [];
+        return {
+          items: files.map(function (f) {
+            return normalizeFolderItem(f, '', false);
+          }),
+          nextPageToken: payload.nextPageToken ? String(payload.nextPageToken) : null
+        };
+      });
+    }
+
     return {
       getFolderDetails: getFolderDetails,
       getHtmlFileList: getHtmlFileList,
       searchHtmlFiles: searchHtmlFiles,
-      getHtmlFileContent: getHtmlFileContent
+      getHtmlFileContent: getHtmlFileContent,
+      listSubfolders: listSubfolders,
+      listSharedDrives: listSharedDrives,
+      searchFolders: searchFolders
     };
   }
 
   var exported = {
     DRIVE_FILES_API_BASE: DRIVE_FILES_API_BASE,
+    DRIVE_DRIVES_API_BASE: DRIVE_DRIVES_API_BASE,
     sanitizeSearchQuery: sanitizeSearchQuery,
     isHtmlDriveFile: isHtmlDriveFile,
     formatDriveTimestamp: formatDriveTimestamp,

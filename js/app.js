@@ -124,9 +124,25 @@
     var authOverlayLoading = doc.getElementById('authOverlayLoading');
     var authOverlayError = doc.getElementById('authOverlayError');
 
-    // 手動フォルダ入力モーダル
+    // 統合フォルダ選択モーダル
     var manualFolderModal = doc.getElementById('manualFolderModal');
     var folderIdInput = doc.getElementById('folderIdInput');
+    var submitFolderBtn = doc.getElementById('submitFolderBtn');
+    var folderModalTabBrowser = doc.getElementById('folderModalTabBrowser');
+    var folderModalTabManual = doc.getElementById('folderModalTabManual');
+    var folderBrowserPanel = doc.getElementById('folderBrowserPanel');
+    var folderManualPanel = doc.getElementById('folderManualPanel');
+    var folderSpaceMyDriveBtn = doc.getElementById('folderSpaceMyDriveBtn');
+    var folderSpaceSharedDrivesBtn = doc.getElementById('folderSpaceSharedDrivesBtn');
+    var folderSpaceSharedWithMeBtn = doc.getElementById('folderSpaceSharedWithMeBtn');
+    var folderSearchInput = doc.getElementById('folderSearchInput');
+    var clearFolderSearchBtn = doc.getElementById('clearFolderSearchBtn');
+    var folderBreadcrumbs = doc.getElementById('folderBreadcrumbs');
+    var folderBrowserList = doc.getElementById('folderBrowserList');
+    var folderLoadMoreWrap = doc.getElementById('folderLoadMoreWrap');
+    var folderLoadMoreBtn = doc.getElementById('folderLoadMoreBtn');
+    var selectCurrentFolderBtn = doc.getElementById('selectCurrentFolderBtn');
+    var openGooglePickerWrap = doc.getElementById('openGooglePickerWrap');
 
     // GCP 設定モーダル
     var settingsModal = doc.getElementById('settingsModal');
@@ -413,19 +429,225 @@
       }
     }
 
-    function openManualFolderModal(initialValue) {
+    function setTabButtonStyle(btn, active) {
+      if (!btn || !btn.classList) return;
+      btn.classList.remove(
+        'border-blue-600', 'text-blue-600', 'font-semibold',
+        'border-transparent', 'text-slate-500', 'hover:text-slate-700', 'font-medium'
+      );
+      if (active) {
+        btn.classList.add('border-blue-600', 'text-blue-600', 'font-semibold');
+      } else {
+        btn.classList.add('border-transparent', 'text-slate-500', 'hover:text-slate-700', 'font-medium');
+      }
+    }
+
+    function setSpaceButtonStyle(btn, active) {
+      if (!btn || !btn.classList) return;
+      btn.classList.remove(
+        'bg-blue-600', 'text-white', 'border-blue-600', 'shadow-sm',
+        'bg-white', 'text-slate-600', 'border-slate-200', 'hover:bg-slate-50'
+      );
+      if (active) {
+        btn.classList.add('bg-blue-600', 'text-white', 'border-blue-600', 'shadow-sm');
+      } else {
+        btn.classList.add('bg-white', 'text-slate-600', 'border-slate-200', 'hover:bg-slate-50');
+      }
+    }
+
+    function switchFolderModalTab(tab) {
+      var isManual = tab === 'manual';
+      setTabButtonStyle(folderModalTabBrowser, !isManual);
+      setTabButtonStyle(folderModalTabManual, isManual);
+
+      if (folderBrowserPanel && folderBrowserPanel.classList) {
+        if (isManual) folderBrowserPanel.classList.add('hidden');
+        else folderBrowserPanel.classList.remove('hidden');
+      }
+      if (folderManualPanel && folderManualPanel.classList) {
+        if (isManual) folderManualPanel.classList.remove('hidden');
+        else folderManualPanel.classList.add('hidden');
+      }
+      if (selectCurrentFolderBtn && selectCurrentFolderBtn.classList) {
+        if (isManual) selectCurrentFolderBtn.classList.add('hidden');
+        else selectCurrentFolderBtn.classList.remove('hidden');
+      }
+      if (submitFolderBtn && submitFolderBtn.classList) {
+        if (isManual) submitFolderBtn.classList.remove('hidden');
+        else submitFolderBtn.classList.add('hidden');
+      }
+
+      if (isManual && folderIdInput && typeof folderIdInput.focus === 'function') {
+        setTimeout(function () {
+          if (folderIdInput) folderIdInput.focus();
+        }, 80);
+      }
+    }
+
+    function setPickerTriggerVisible(visible) {
+      if (!openGooglePickerWrap || !openGooglePickerWrap.classList) return;
+      if (visible) {
+        openGooglePickerWrap.classList.remove('hidden');
+      } else {
+        openGooglePickerWrap.classList.add('hidden');
+      }
+    }
+
+    function openFolderSelectorModal(options) {
       if (!manualFolderModal) return;
-      if (folderIdInput) folderIdInput.value = initialValue || '';
-      manualFolderModal.classList.remove('hidden');
-      setTimeout(function () {
-        if (folderIdInput) folderIdInput.focus();
-      }, 80);
+      var opts = options || {};
+      if (folderIdInput && opts.initialManualValue !== undefined) {
+        folderIdInput.value = opts.initialManualValue || '';
+      }
+      switchFolderModalTab(opts.initialTab === 'manual' ? 'manual' : 'browser');
+      setPickerTriggerVisible(Boolean(opts.pickerAvailable));
+      if (manualFolderModal.classList) {
+        manualFolderModal.classList.remove('hidden');
+      }
+    }
+
+    function closeFolderSelectorModal() {
+      if (manualFolderModal && manualFolderModal.classList) {
+        manualFolderModal.classList.add('hidden');
+      }
+    }
+
+    function renderFolderBrowserState(viewState) {
+      var state = viewState || {};
+      var space = state.space || 'MY_DRIVE';
+
+      setSpaceButtonStyle(folderSpaceMyDriveBtn, space === 'MY_DRIVE');
+      setSpaceButtonStyle(folderSpaceSharedDrivesBtn, space === 'SHARED_DRIVES');
+      setSpaceButtonStyle(folderSpaceSharedWithMeBtn, space === 'SHARED_WITH_ME');
+
+      if (folderSearchInput && typeof state.searchKeyword === 'string' && folderSearchInput.value !== state.searchKeyword) {
+        folderSearchInput.value = state.searchKeyword;
+      }
+      if (clearFolderSearchBtn && clearFolderSearchBtn.classList) {
+        if (state.searchKeyword && state.searchKeyword.length > 0) {
+          clearFolderSearchBtn.classList.remove('hidden');
+        } else {
+          clearFolderSearchBtn.classList.add('hidden');
+        }
+      }
+
+      if (folderBreadcrumbs) {
+        var crumbs = Array.isArray(state.breadcrumbs) ? state.breadcrumbs : [];
+        if (state.searchKeyword && String(state.searchKeyword).trim() !== '') {
+          folderBreadcrumbs.innerHTML =
+            '<span class="text-slate-500 flex-shrink-0">検索結果:</span> ' +
+            '<span class="font-semibold text-slate-800 max-w-[200px] truncate flex-shrink-0">' +
+              escapeHtml(String(state.searchKeyword).trim()) +
+            '</span>';
+        } else {
+          var crumbHtml = [];
+          for (var c = 0; c < crumbs.length; c++) {
+            var crumb = crumbs[c] || {};
+            var isLast = c === crumbs.length - 1;
+            if (c > 0) {
+              crumbHtml.push('<span class="text-slate-300 flex-shrink-0">&gt;</span>');
+            }
+            if (isLast) {
+              crumbHtml.push(
+                '<span class="font-semibold text-slate-800 max-w-[130px] sm:max-w-[200px] truncate flex-shrink-0">' +
+                  escapeHtml(crumb.name || '') +
+                '</span>'
+              );
+            } else {
+              crumbHtml.push(
+                '<button type="button" data-breadcrumb-index="' + c + '" class="text-blue-600 hover:underline max-w-[130px] sm:max-w-[200px] truncate flex-shrink-0">' +
+                  escapeHtml(crumb.name || '') +
+                '</button>'
+              );
+            }
+          }
+          folderBreadcrumbs.innerHTML = crumbHtml.join('');
+        }
+      }
+
+      if (folderBrowserList) {
+        if (state.isLoading && !state.isLoadingMore && folderBrowserList.parentElement && typeof folderBrowserList.parentElement.scrollTop === 'number') {
+          folderBrowserList.parentElement.scrollTop = 0;
+        }
+        if (state.isLoading) {
+          folderBrowserList.innerHTML =
+            '<div class="py-10 flex flex-col items-center justify-center text-slate-500">' +
+              '<div class="animate-spin rounded-full h-6 w-6 border-2 border-blue-600 border-t-transparent mb-2"></div>' +
+              '<p class="text-xs">フォルダ一覧を読み込み中...</p>' +
+            '</div>';
+        } else if (state.errorMessage) {
+          folderBrowserList.innerHTML =
+            '<div class="py-8 px-4 text-center">' +
+              '<p class="text-xs text-rose-600 mb-3">' + escapeHtml(state.errorMessage) + '</p>' +
+              '<button type="button" data-action="retry" class="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors">' +
+                '再試行' +
+              '</button>' +
+            '</div>';
+        } else if (!Array.isArray(state.items) || state.items.length === 0) {
+          folderBrowserList.innerHTML =
+            '<div class="py-10 text-center text-xs text-slate-400">' +
+              '<p>表示できるフォルダがありません</p>' +
+            '</div>';
+        } else {
+          var rowHtml = [];
+          for (var i = 0; i < state.items.length; i++) {
+            var item = state.items[i] || {};
+            var iconSvg = item.isSharedDrive
+              ? '<svg class="w-4 h-4 flex-shrink-0 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2" /></svg>'
+              : '<svg class="w-4 h-4 flex-shrink-0 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>';
+
+            rowHtml.push(
+              '<div class="flex items-center justify-between gap-2 py-2 px-1 hover:bg-slate-50 rounded-lg transition-colors">' +
+                '<button type="button" data-action="open" data-item-index="' + i + '" class="flex-1 min-w-0 flex items-center gap-2 text-left py-1 px-1 rounded focus:outline-none focus:ring-2 focus:ring-blue-500">' +
+                  iconSvg +
+                  '<span class="text-xs sm:text-sm text-slate-800 truncate">' + escapeHtml(item.name || '') + '</span>' +
+                '</button>' +
+                '<button type="button" data-action="select" data-item-index="' + i + '" class="flex-shrink-0 px-2.5 py-1 text-xs font-medium text-blue-600 hover:text-white hover:bg-blue-600 border border-blue-200 rounded-md transition-colors whitespace-nowrap">' +
+                  '選択' +
+                '</button>' +
+              '</div>'
+            );
+          }
+          folderBrowserList.innerHTML = rowHtml.join('');
+        }
+      }
+
+      if (folderLoadMoreWrap && folderLoadMoreWrap.classList) {
+        if (state.hasMore && !state.isLoading && !state.errorMessage) {
+          folderLoadMoreWrap.classList.remove('hidden');
+        } else {
+          folderLoadMoreWrap.classList.add('hidden');
+        }
+      }
+
+      if (folderLoadMoreBtn) {
+        folderLoadMoreBtn.disabled = Boolean(state.isLoadingMore);
+        folderLoadMoreBtn.textContent = state.isLoadingMore ? '読み込み中...' : 'さらに読み込む';
+      }
+
+      if (selectCurrentFolderBtn) {
+        var canSelect = Boolean(state.canSelectCurrentFolder);
+        selectCurrentFolderBtn.disabled = !canSelect;
+        if (selectCurrentFolderBtn.classList) {
+          if (canSelect) {
+            selectCurrentFolderBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+          } else {
+            selectCurrentFolderBtn.classList.add('opacity-50', 'cursor-not-allowed');
+          }
+        }
+      }
+    }
+
+    function openManualFolderModal(initialValue) {
+      openFolderSelectorModal({
+        initialTab: 'manual',
+        initialManualValue: initialValue || '',
+        pickerAvailable: false
+      });
     }
 
     function closeManualFolderModal() {
-      if (manualFolderModal) {
-        manualFolderModal.classList.add('hidden');
-      }
+      closeFolderSelectorModal();
     }
 
     function getManualFolderInput() {
@@ -517,6 +739,11 @@
       resetPreview: resetPreview,
       clearListArea: clearListArea,
       renderAuthState: renderAuthState,
+      openFolderSelectorModal: openFolderSelectorModal,
+      closeFolderSelectorModal: closeFolderSelectorModal,
+      switchFolderModalTab: switchFolderModalTab,
+      setPickerTriggerVisible: setPickerTriggerVisible,
+      renderFolderBrowserState: renderFolderBrowserState,
       openManualFolderModal: openManualFolderModal,
       closeManualFolderModal: closeManualFolderModal,
       getManualFolderInput: getManualFolderInput,
@@ -561,15 +788,40 @@
     var lastLoadedFileName = '';
     var currentSearchRequestId = 0;
     var currentPreviewRequestId = 0;
+    var folderBrowseRequestId = 0;
+    var manualFolderRequestId = 0;
     var searchDebounceTimer = null;
+    var folderSearchDebounceTimer = null;
     var hasAttemptedFallback = false;
     var pendingRetryAction = null;
     var lastAuthStatus = null;
+    var folderBrowserState = createInitialFolderBrowserState();
+
+    function createInitialFolderBrowserState() {
+      return {
+        activeTab: 'browser',
+        space: 'MY_DRIVE',
+        breadcrumbs: [{ id: 'root', name: 'マイドライブ', driveId: '' }],
+        items: [],
+        nextPageToken: null,
+        searchKeyword: '',
+        isLoading: false,
+        isLoadingMore: false,
+        errorMessage: ''
+      };
+    }
 
     function cancelPendingSearch() {
       if (searchDebounceTimer !== null) {
         clearTimeout(searchDebounceTimer);
         searchDebounceTimer = null;
+      }
+    }
+
+    function cancelPendingFolderSearch() {
+      if (folderSearchDebounceTimer !== null) {
+        clearTimeout(folderSearchDebounceTimer);
+        folderSearchDebounceTimer = null;
       }
     }
 
@@ -600,6 +852,7 @@
 
     function clearWorkingViewState() {
       cancelPendingSearch();
+      closeFolderModalSafe();
       currentFolderId = '';
       activeFileId = null;
       currentRawHtml = null;
@@ -616,6 +869,7 @@
 
     function applyFolder(folderId, folderName) {
       cancelPendingSearch();
+      manualFolderRequestId++;
       currentFolderId = folderId;
       hasAttemptedFallback = false;
       storage.set(storageKeys.LAST_FOLDER_ID, folderId);
@@ -854,6 +1108,150 @@
       }
     }
 
+    function isPickerAvailableNow() {
+      return Boolean(
+        resolvedConfig &&
+        resolvedConfig.isPickerConfigured &&
+        pickerService &&
+        typeof pickerService.isLoaded === 'function' &&
+        pickerService.isLoaded()
+      );
+    }
+
+    function refreshPickerAvailability() {
+      if (typeof ui.setPickerTriggerVisible === 'function') {
+        ui.setPickerTriggerVisible(isPickerAvailableNow());
+      }
+    }
+
+    function canSelectCurrentBreadcrumb() {
+      if (folderBrowserState.searchKeyword && folderBrowserState.searchKeyword.trim() !== '') {
+        return false;
+      }
+      if (!Array.isArray(folderBrowserState.breadcrumbs) || folderBrowserState.breadcrumbs.length <= 1) {
+        return false;
+      }
+      var last = folderBrowserState.breadcrumbs[folderBrowserState.breadcrumbs.length - 1];
+      return Boolean(last && last.id);
+    }
+
+    function syncFolderBrowserUi() {
+      if (typeof ui.renderFolderBrowserState === 'function') {
+        ui.renderFolderBrowserState({
+          space: folderBrowserState.space,
+          breadcrumbs: folderBrowserState.breadcrumbs,
+          items: folderBrowserState.items,
+          hasMore: Boolean(folderBrowserState.nextPageToken),
+          isLoading: folderBrowserState.isLoading,
+          isLoadingMore: folderBrowserState.isLoadingMore,
+          errorMessage: folderBrowserState.errorMessage,
+          searchKeyword: folderBrowserState.searchKeyword,
+          canSelectCurrentFolder: canSelectCurrentBreadcrumb()
+        });
+      }
+    }
+
+    function closeFolderModalSafe() {
+      cancelPendingFolderSearch();
+      folderBrowseRequestId++;
+      manualFolderRequestId++;
+      if (typeof ui.closeFolderSelectorModal === 'function') {
+        ui.closeFolderSelectorModal();
+      } else if (typeof ui.closeManualFolderModal === 'function') {
+        ui.closeManualFolderModal();
+      }
+    }
+
+    function fetchFolderBrowserPage(options) {
+      var append = Boolean(options && options.append);
+
+      if (!authService.getValidToken()) {
+        closeFolderModalSafe();
+        if (!routeUnauthorizedOrAbort({ type: 'openFolderSelection' })) {
+          ui.showErrorToast('認証が必要です', 'フォルダを選択するには Google でサインインしてください。');
+        }
+        return Promise.resolve({ success: false, errorCode: 'UNAUTHORIZED' });
+      }
+
+      var requestId = ++folderBrowseRequestId;
+      var signal = {
+        isCancelled: function () {
+          return requestId !== folderBrowseRequestId;
+        }
+      };
+
+      if (append) {
+        folderBrowserState.isLoadingMore = true;
+        folderBrowserState.errorMessage = '';
+      } else {
+        folderBrowserState.isLoading = true;
+        folderBrowserState.isLoadingMore = false;
+        folderBrowserState.errorMessage = '';
+        folderBrowserState.items = [];
+        folderBrowserState.nextPageToken = null;
+      }
+      syncFolderBrowserUi();
+
+      var pageToken = append ? (folderBrowserState.nextPageToken || undefined) : undefined;
+      var trimmedKeyword = (folderBrowserState.searchKeyword || '').trim();
+      var promise;
+
+      if (trimmedKeyword) {
+        promise = driveApi.searchFolders({
+          keyword: trimmedKeyword,
+          pageToken: pageToken
+        }, signal);
+      } else if (folderBrowserState.space === 'SHARED_DRIVES' && folderBrowserState.breadcrumbs.length === 1) {
+        promise = driveApi.listSharedDrives({
+          pageToken: pageToken
+        }, signal);
+      } else {
+        var lastCrumb = folderBrowserState.breadcrumbs[folderBrowserState.breadcrumbs.length - 1] || {};
+        promise = driveApi.listSubfolders({
+          space: folderBrowserState.space,
+          parentId: lastCrumb.id || undefined,
+          driveId: lastCrumb.driveId || undefined,
+          pageToken: pageToken
+        }, signal);
+      }
+
+      return promise.then(function (res) {
+        if (requestId !== folderBrowseRequestId || (res && res.cancelled)) {
+          return res;
+        }
+
+        folderBrowserState.isLoading = false;
+        folderBrowserState.isLoadingMore = false;
+
+        if (res && res.success) {
+          var pageItems = Array.isArray(res.items)
+            ? res.items
+            : (res.data && Array.isArray(res.data.items) ? res.data.items : []);
+          var nextToken = res.nextPageToken !== undefined
+            ? res.nextPageToken
+            : (res.data && res.data.nextPageToken !== undefined ? res.data.nextPageToken : null);
+
+          folderBrowserState.items = append ? folderBrowserState.items.concat(pageItems) : pageItems;
+          folderBrowserState.nextPageToken = nextToken || null;
+          folderBrowserState.errorMessage = '';
+          syncFolderBrowserUi();
+          return res;
+        }
+
+        if (res && res.errorCode === 'UNAUTHORIZED') {
+          closeFolderModalSafe();
+          routeUnauthorizedOrAbort({ type: 'openFolderSelection' });
+          return res;
+        }
+
+        folderBrowserState.errorMessage = (res && res.error)
+          ? res.error
+          : 'フォルダ一覧の取得に失敗しました。';
+        syncFolderBrowserUi();
+        return res;
+      });
+    }
+
     function openFolderSelection() {
       if (!resolvedConfig || !resolvedConfig.isAuthConfigured) {
         openSettingsModal();
@@ -868,8 +1266,155 @@
         return;
       }
 
-      if (!resolvedConfig.isPickerConfigured) {
+      if (typeof ui.openFolderSelectorModal !== 'function') {
         ui.openManualFolderModal(currentFolderId);
+        return;
+      }
+
+      cancelPendingFolderSearch();
+      folderBrowserState = createInitialFolderBrowserState();
+      ui.openFolderSelectorModal({
+        initialTab: 'browser',
+        initialManualValue: currentFolderId,
+        pickerAvailable: isPickerAvailableNow()
+      });
+
+      return fetchFolderBrowserPage({ append: false });
+    }
+
+    function switchFolderModalTab(tab) {
+      cancelPendingFolderSearch();
+      if (tab !== 'manual') {
+        manualFolderRequestId++;
+      }
+      folderBrowserState.activeTab = tab === 'manual' ? 'manual' : 'browser';
+      if (typeof ui.switchFolderModalTab === 'function') {
+        ui.switchFolderModalTab(folderBrowserState.activeTab);
+      }
+    }
+
+    function switchFolderBrowserSpace(space) {
+      cancelPendingFolderSearch();
+      var targetSpace = (space === 'SHARED_DRIVES' || space === 'SHARED_WITH_ME') ? space : 'MY_DRIVE';
+      folderBrowserState.space = targetSpace;
+      folderBrowserState.searchKeyword = '';
+      if (targetSpace === 'MY_DRIVE') {
+        folderBrowserState.breadcrumbs = [{ id: 'root', name: 'マイドライブ', driveId: '' }];
+      } else if (targetSpace === 'SHARED_DRIVES') {
+        folderBrowserState.breadcrumbs = [{ id: '', name: '共有ドライブ', driveId: '' }];
+      } else {
+        folderBrowserState.breadcrumbs = [{ id: '', name: '共有アイテム', driveId: '' }];
+      }
+      return fetchFolderBrowserPage({ append: false });
+    }
+
+    function openFolderBrowserItem(item) {
+      if (!item || !item.id) {
+        return Promise.resolve({ success: false, errorCode: 'INVALID_INPUT' });
+      }
+      cancelPendingFolderSearch();
+
+      var wasSearching = Boolean(folderBrowserState.searchKeyword && folderBrowserState.searchKeyword.trim() !== '');
+      folderBrowserState.searchKeyword = '';
+
+      if (wasSearching) {
+        if (item.driveId) {
+          folderBrowserState.space = 'SHARED_DRIVES';
+          folderBrowserState.breadcrumbs = [
+            { id: '', name: '共有ドライブ', driveId: '' },
+            { id: item.id, name: item.name || item.id, driveId: item.driveId }
+          ];
+        } else {
+          folderBrowserState.space = 'MY_DRIVE';
+          folderBrowserState.breadcrumbs = [
+            { id: 'root', name: 'マイドライブ', driveId: '' },
+            { id: item.id, name: item.name || item.id, driveId: '' }
+          ];
+        }
+      } else {
+        var lastCrumb = folderBrowserState.breadcrumbs[folderBrowserState.breadcrumbs.length - 1] || {};
+        var inheritedDriveId = item.driveId || lastCrumb.driveId || '';
+        folderBrowserState.breadcrumbs.push({
+          id: item.id,
+          name: item.name || item.id,
+          driveId: inheritedDriveId
+        });
+      }
+
+      return fetchFolderBrowserPage({ append: false });
+    }
+
+    function navigateFolderBreadcrumb(index) {
+      var idx = Number(index);
+      if (!isFinite(idx) || idx < 0 || idx >= folderBrowserState.breadcrumbs.length) {
+        return Promise.resolve();
+      }
+      cancelPendingFolderSearch();
+      folderBrowserState.searchKeyword = '';
+      folderBrowserState.breadcrumbs = folderBrowserState.breadcrumbs.slice(0, idx + 1);
+      return fetchFolderBrowserPage({ append: false });
+    }
+
+    function searchBrowserFolders(keyword) {
+      cancelPendingFolderSearch();
+      folderBrowserState.searchKeyword = typeof keyword === 'string' ? keyword : '';
+      return fetchFolderBrowserPage({ append: false });
+    }
+
+    function scheduleFolderBrowserSearch(keyword, delayMs) {
+      cancelPendingFolderSearch();
+      var waitMs = typeof delayMs === 'number' ? delayMs : 350;
+      var pendingKeyword = typeof keyword === 'string' ? keyword : '';
+      folderSearchDebounceTimer = setTimeout(function () {
+        folderSearchDebounceTimer = null;
+        folderBrowserState.searchKeyword = pendingKeyword;
+        fetchFolderBrowserPage({ append: false });
+      }, waitMs);
+    }
+
+    function loadMoreBrowserFolders() {
+      cancelPendingFolderSearch();
+      if (!folderBrowserState.nextPageToken || folderBrowserState.isLoading || folderBrowserState.isLoadingMore) {
+        return Promise.resolve();
+      }
+      return fetchFolderBrowserPage({ append: true });
+    }
+
+    function retryFolderBrowser() {
+      cancelPendingFolderSearch();
+      return fetchFolderBrowserPage({ append: false });
+    }
+
+    function confirmBrowserFolder(folder) {
+      if (!folder || !folder.id) {
+        return Promise.resolve({ success: false, errorCode: 'INVALID_INPUT' });
+      }
+      closeFolderModalSafe();
+      return applyFolder(folder.id, folder.name || folder.id);
+    }
+
+    function confirmCurrentBrowserFolder() {
+      cancelPendingFolderSearch();
+      if (!canSelectCurrentBreadcrumb()) {
+        return Promise.resolve({ success: false, errorCode: 'INVALID_INPUT' });
+      }
+      var last = folderBrowserState.breadcrumbs[folderBrowserState.breadcrumbs.length - 1];
+      return confirmBrowserFolder({ id: last.id, name: last.name });
+    }
+
+    function openGooglePickerFromModal() {
+      if (!resolvedConfig || !resolvedConfig.isAuthConfigured) {
+        closeFolderModalSafe();
+        openSettingsModal();
+        return;
+      }
+
+      var token = authService.getValidToken();
+      if (!token) {
+        closeFolderModalSafe();
+        if (!routeUnauthorizedOrAbort({ type: 'openFolderSelection' })) {
+          ui.showErrorToast('認証が必要です', 'フォルダを選択するには Google でサインインしてください。');
+        }
         return;
       }
 
@@ -878,12 +1423,36 @@
         apiKey: resolvedConfig.apiKey,
         appId: resolvedConfig.appId,
         onPicked: function (folder) {
+          closeFolderModalSafe();
           applyFolder(folder.id, folder.name);
         },
-        onFallbackToManual: function () {
-          ui.openManualFolderModal(currentFolderId);
+        onCancel: function () {
+          // 統合モーダルを開いたまま維持し、別手段で選択継続できるようにする
+        },
+        onFallbackToManual: function (reason) {
+          switchFolderModalTab('manual');
+          ui.showInfoToast(
+            '直接入力へ切り替えました',
+            reason || 'Google Picker を起動できないため、ID / URL 直接入力へ切り替えました。'
+          );
         }
       });
+    }
+
+    function getFolderBrowserState() {
+      return {
+        activeTab: folderBrowserState.activeTab,
+        space: folderBrowserState.space,
+        breadcrumbs: folderBrowserState.breadcrumbs.map(function (c) {
+          return { id: c.id, name: c.name, driveId: c.driveId };
+        }),
+        items: folderBrowserState.items.slice(),
+        nextPageToken: folderBrowserState.nextPageToken,
+        searchKeyword: folderBrowserState.searchKeyword,
+        isLoading: folderBrowserState.isLoading,
+        isLoadingMore: folderBrowserState.isLoadingMore,
+        errorMessage: folderBrowserState.errorMessage
+      };
     }
 
     function submitManualFolder(explicitValue) {
@@ -894,23 +1463,27 @@
       }
 
       if (!authService.getValidToken()) {
-        ui.closeManualFolderModal();
+        closeFolderModalSafe();
         if (!routeUnauthorizedOrAbort({ type: 'manualFolder', inputVal: val })) {
           ui.showErrorToast('認証が必要です', 'フォルダを適用するには Google でサインインしてください。');
         }
         return Promise.resolve({ success: false, errorCode: 'UNAUTHORIZED' });
       }
 
+      var requestId = ++manualFolderRequestId;
       ui.setStatus('検証中...', 'bg-blue-500 animate-pulse');
       return driveApi.getFolderDetails(val).then(function (res) {
+        if (requestId !== manualFolderRequestId) {
+          return { success: false, cancelled: true, error: 'リクエストがキャンセルされました。' };
+        }
         if (res.success) {
-          ui.closeManualFolderModal();
+          closeFolderModalSafe();
           return applyFolder(res.folder.id, res.folder.name).then(function () {
             return res;
           });
         }
         if (res.errorCode === 'UNAUTHORIZED') {
-          ui.closeManualFolderModal();
+          closeFolderModalSafe();
           routeUnauthorizedOrAbort({ type: 'manualFolder', inputVal: val });
           return res;
         }
@@ -999,7 +1572,9 @@
 
     function init() {
       resolvedConfig = configProvider.loadConfig(undefined, storage);
-      pickerService.load();
+      pickerService.load(function () {
+        refreshPickerAvailability();
+      });
       authService.init(resolvedConfig.clientId, handleAuthStateChange);
     }
 
@@ -1011,6 +1586,20 @@
       cancelPendingSearch: cancelPendingSearch,
       selectFile: selectFile,
       openFolderSelection: openFolderSelection,
+      closeFolderModal: closeFolderModalSafe,
+      switchFolderModalTab: switchFolderModalTab,
+      switchFolderBrowserSpace: switchFolderBrowserSpace,
+      openFolderBrowserItem: openFolderBrowserItem,
+      navigateFolderBreadcrumb: navigateFolderBreadcrumb,
+      searchBrowserFolders: searchBrowserFolders,
+      scheduleFolderBrowserSearch: scheduleFolderBrowserSearch,
+      loadMoreBrowserFolders: loadMoreBrowserFolders,
+      retryFolderBrowser: retryFolderBrowser,
+      confirmBrowserFolder: confirmBrowserFolder,
+      confirmCurrentBrowserFolder: confirmCurrentBrowserFolder,
+      openGooglePickerFromModal: openGooglePickerFromModal,
+      refreshPickerAvailability: refreshPickerAvailability,
+      getFolderBrowserState: getFolderBrowserState,
       submitManualFolder: submitManualFolder,
       reloadPreview: reloadPreview,
       handleAuthAction: handleAuthAction,
@@ -1047,11 +1636,24 @@
     var reloadPreviewBtn = document.getElementById('reloadPreviewBtn');
     var toastCloseBtn = document.getElementById('toastCloseBtn');
 
-    // 手動フォルダモーダル
+    // 統合フォルダ選択モーダル
     var closeModalBtn = document.getElementById('closeModalBtn');
     var cancelModalBtn = document.getElementById('cancelModalBtn');
     var submitFolderBtn = document.getElementById('submitFolderBtn');
     var folderIdInput = document.getElementById('folderIdInput');
+    var folderModalTabBrowser = document.getElementById('folderModalTabBrowser');
+    var folderModalTabManual = document.getElementById('folderModalTabManual');
+    var folderSpaceMyDriveBtn = document.getElementById('folderSpaceMyDriveBtn');
+    var folderSpaceSharedDrivesBtn = document.getElementById('folderSpaceSharedDrivesBtn');
+    var folderSpaceSharedWithMeBtn = document.getElementById('folderSpaceSharedWithMeBtn');
+    var folderSearchInput = document.getElementById('folderSearchInput');
+    var clearFolderSearchBtn = document.getElementById('clearFolderSearchBtn');
+    var folderSearchSubmitBtn = document.getElementById('folderSearchSubmitBtn');
+    var folderBreadcrumbs = document.getElementById('folderBreadcrumbs');
+    var folderBrowserList = document.getElementById('folderBrowserList');
+    var folderLoadMoreBtn = document.getElementById('folderLoadMoreBtn');
+    var selectCurrentFolderBtn = document.getElementById('selectCurrentFolderBtn');
+    var openGooglePickerBtn = document.getElementById('openGooglePickerBtn');
 
     // 認証・バナー・オーバーレイ
     var authActionBtn = document.getElementById('authActionBtn');
@@ -1071,8 +1673,8 @@
     if (backToListBtn) backToListBtn.addEventListener('click', function () { ui.switchMobileView('list'); });
     if (toastCloseBtn) toastCloseBtn.addEventListener('click', ui.hideToast);
 
-    if (closeModalBtn) closeModalBtn.addEventListener('click', ui.closeManualFolderModal);
-    if (cancelModalBtn) cancelModalBtn.addEventListener('click', ui.closeManualFolderModal);
+    if (closeModalBtn) closeModalBtn.addEventListener('click', controller.closeFolderModal);
+    if (cancelModalBtn) cancelModalBtn.addEventListener('click', controller.closeFolderModal);
     if (submitFolderBtn) submitFolderBtn.addEventListener('click', function () { controller.submitManualFolder(); });
     if (folderIdInput) {
       folderIdInput.addEventListener('keydown', function (e) {
@@ -1080,6 +1682,109 @@
           controller.submitManualFolder();
         }
       });
+    }
+
+    if (folderModalTabBrowser) {
+      folderModalTabBrowser.addEventListener('click', function () {
+        controller.switchFolderModalTab('browser');
+      });
+    }
+    if (folderModalTabManual) {
+      folderModalTabManual.addEventListener('click', function () {
+        controller.switchFolderModalTab('manual');
+      });
+    }
+    if (folderSpaceMyDriveBtn) {
+      folderSpaceMyDriveBtn.addEventListener('click', function () {
+        controller.switchFolderBrowserSpace('MY_DRIVE');
+      });
+    }
+    if (folderSpaceSharedDrivesBtn) {
+      folderSpaceSharedDrivesBtn.addEventListener('click', function () {
+        controller.switchFolderBrowserSpace('SHARED_DRIVES');
+      });
+    }
+    if (folderSpaceSharedWithMeBtn) {
+      folderSpaceSharedWithMeBtn.addEventListener('click', function () {
+        controller.switchFolderBrowserSpace('SHARED_WITH_ME');
+      });
+    }
+    if (folderSearchInput) {
+      folderSearchInput.addEventListener('input', function (e) {
+        var val = e.target.value;
+        if (clearFolderSearchBtn) {
+          if (val.length > 0) {
+            clearFolderSearchBtn.classList.remove('hidden');
+          } else {
+            clearFolderSearchBtn.classList.add('hidden');
+          }
+        }
+        controller.scheduleFolderBrowserSearch(val, 350);
+      });
+      folderSearchInput.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') {
+          controller.searchBrowserFolders(folderSearchInput.value);
+        }
+      });
+    }
+    if (clearFolderSearchBtn) {
+      clearFolderSearchBtn.addEventListener('click', function () {
+        if (folderSearchInput) {
+          folderSearchInput.value = '';
+          folderSearchInput.focus();
+        }
+        clearFolderSearchBtn.classList.add('hidden');
+        controller.searchBrowserFolders('');
+      });
+    }
+    if (folderSearchSubmitBtn) {
+      folderSearchSubmitBtn.addEventListener('click', function () {
+        controller.searchBrowserFolders(folderSearchInput ? folderSearchInput.value : '');
+      });
+    }
+    if (folderBreadcrumbs) {
+      folderBreadcrumbs.addEventListener('click', function (e) {
+        var target = e.target && typeof e.target.closest === 'function'
+          ? e.target.closest('[data-breadcrumb-index]')
+          : null;
+        if (target) {
+          controller.navigateFolderBreadcrumb(Number(target.getAttribute('data-breadcrumb-index')));
+        }
+      });
+    }
+    if (folderBrowserList) {
+      folderBrowserList.addEventListener('click', function (e) {
+        var actionEl = e.target && typeof e.target.closest === 'function'
+          ? e.target.closest('[data-action]')
+          : null;
+        if (!actionEl) return;
+
+        var action = actionEl.getAttribute('data-action');
+        if (action === 'retry') {
+          controller.retryFolderBrowser();
+          return;
+        }
+
+        var idx = Number(actionEl.getAttribute('data-item-index'));
+        var browserState = controller.getFolderBrowserState();
+        var item = (browserState && Array.isArray(browserState.items)) ? browserState.items[idx] : null;
+        if (!item) return;
+
+        if (action === 'open') {
+          controller.openFolderBrowserItem(item);
+        } else if (action === 'select') {
+          controller.confirmBrowserFolder(item);
+        }
+      });
+    }
+    if (folderLoadMoreBtn) {
+      folderLoadMoreBtn.addEventListener('click', controller.loadMoreBrowserFolders);
+    }
+    if (selectCurrentFolderBtn) {
+      selectCurrentFolderBtn.addEventListener('click', controller.confirmCurrentBrowserFolder);
+    }
+    if (openGooglePickerBtn) {
+      openGooglePickerBtn.addEventListener('click', controller.openGooglePickerFromModal);
     }
 
     if (searchInput) {
@@ -1132,7 +1837,9 @@
     var gapiScriptEl = document.getElementById('gapiScript');
     if (gapiScriptEl) {
       gapiScriptEl.addEventListener('load', function () {
-        pickerService.load();
+        pickerService.load(function () {
+          controller.refreshPickerAvailability();
+        });
       });
     }
 

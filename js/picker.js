@@ -21,6 +21,22 @@
     var opts = options || {};
     var pickerApiLoaded = false;
     var statusListeners = [];
+    var activePicker = null;
+
+    function disposeActivePicker() {
+      if (!activePicker) {
+        return;
+      }
+      var target = activePicker;
+      activePicker = null;
+      if (typeof target.dispose === 'function') {
+        try {
+          target.dispose();
+        } catch (e) {
+          console.warn('[PickerService] picker.dispose() error:', e);
+        }
+      }
+    }
 
     function resolveGapi() {
       if (typeof opts.getGapi === 'function') {
@@ -174,6 +190,8 @@
       }
 
       try {
+        disposeActivePicker();
+
         var view = new pickerNs.DocsView(pickerNs.ViewId.FOLDERS)
           .setIncludeFolders(true)
           .setSelectFolderEnabled(true);
@@ -200,6 +218,7 @@
           if (!data) return;
           var action = data[pickerNs.Response.ACTION];
           if (action === pickerNs.Action.PICKED) {
+            disposeActivePicker();
             var docs = data[pickerNs.Response.DOCUMENTS];
             if (Array.isArray(docs) && docs.length > 0 && typeof p.onPicked === 'function') {
               var doc = docs[0];
@@ -209,6 +228,7 @@
               });
             }
           } else if (action === pickerNs.Action.CANCEL) {
+            disposeActivePicker();
             if (typeof p.onCancel === 'function') {
               p.onCancel();
             }
@@ -216,8 +236,10 @@
         });
 
         var picker = builder.build();
+        activePicker = picker;
         picker.setVisible(true);
       } catch (err) {
+        disposeActivePicker();
         console.warn('[PickerService] Picker build/open failed, falling back to manual modal:', err);
         fallback('Google Picker の起動に失敗したため、手動入力に切り替えます。');
       }

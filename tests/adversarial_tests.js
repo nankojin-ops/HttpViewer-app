@@ -15,7 +15,7 @@ const AppConfigProvider = require(path.join(ROOT_DIR, 'js/config.js'));
 const { createAuthService } = require(path.join(ROOT_DIR, 'js/auth.js'));
 const DriveApi = require(path.join(ROOT_DIR, 'js/drive-api.js'));
 const { createPickerService } = require(path.join(ROOT_DIR, 'js/picker.js'));
-const { createAppController, escapeHtml } = require(path.join(ROOT_DIR, 'js/app.js'));
+const { createAppController, createDomUiAdapter, escapeHtml } = require(path.join(ROOT_DIR, 'js/app.js'));
 
 let passCount = 0;
 let failCount = 0;
@@ -674,6 +674,451 @@ testCase('ADV-REC-002', 'URL指定フォルダもデフォルトフォルダも4
 
   assert.strictEqual(fetchCount, 2, 'broken_url と broken_default の2回のみで停止すること');
   assert.strictEqual(manualOpenCount, 1, '最終的に手動入力モーダル誘導で停止すること');
+});
+
+// -----------------------------------------------------------
+// 観点5: 統合フォルダ選択モーダル・フォルダブラウザ敵対的検証
+// -----------------------------------------------------------
+testCase('ADV-XSS-003', 'フォルダブラウザの DomUiAdapter 描画で悪意あるフォルダ名・共有ドライブ名・パンくず・検索語が XSS エスケープされること', () => {
+  function makeMockEl() {
+    const cls = new Set();
+    return {
+      innerHTML: '',
+      textContent: '',
+      value: '',
+      disabled: false,
+      classList: {
+        add: (...names) => names.forEach((n) => cls.add(n)),
+        remove: (...names) => names.forEach((n) => cls.delete(n)),
+        contains: (n) => cls.has(n)
+      }
+    };
+  }
+
+  const elements = new Map();
+  const mockDoc = {
+    getElementById: (id) => {
+      if (!elements.has(id)) {
+        elements.set(id, makeMockEl());
+      }
+      return elements.get(id);
+    },
+    querySelectorAll: () => []
+  };
+
+  const domUi = createDomUiAdapter(mockDoc);
+  const xssFolderName = '<img src=x onerror=alert(1)>';
+  const xssDriveName = '"><script>alert(1)</script>';
+  const xssErrorMsg = '<svg onload=alert(1)>エラー';
+
+  domUi.renderFolderBrowserState({
+    space: 'SHARED_DRIVES',
+    breadcrumbs: [
+      { id: '', name: '共有ドライブ', driveId: '' },
+      { id: 'drv_1', name: xssDriveName, driveId: 'drv_1' }
+    ],
+    items: [
+      { id: 'f_xss', name: xssFolderName, driveId: 'drv_1', isSharedDrive: false },
+      { id: 'd_xss', name: xssDriveName, driveId: 'd_xss', isSharedDrive: true }
+    ],
+    hasMore: false,
+    isLoading: false,
+    isLoadingMore: false,
+    errorMessage: '',
+    searchKeyword: '',
+    canSelectCurrentFolder: true
+  });
+
+  const listHtml = mockDoc.getElementById('folderBrowserList').innerHTML;
+  const crumbHtml = mockDoc.getElementById('folderBreadcrumbs').innerHTML;
+
+  assert.strictEqual(listHtml.includes('<img'), false, '一覧HTMLに生の <img> タグが挿入されないこと');
+  assert.strictEqual(listHtml.includes('<script'), false, '一覧HTMLに生の <script> タグが挿入されないこと');
+  assert.strictEqual(crumbHtml.includes('<script'), false, 'パンくずHTMLに生の <script> タグが挿入されないこと');
+  assert.ok(listHtml.includes('&lt;img src=x onerror=alert(1)&gt;'), 'フォルダ名が HTML エスケープされていること');
+  assert.ok(listHtml.includes('&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;'), '共有ドライブ名が HTML エスケープされていること');
+
+  domUi.renderFolderBrowserState({
+    space: 'MY_DRIVE',
+    breadcrumbs: [{ id: 'root', name: 'マイドライブ', driveId: '' }],
+    items: [],
+    hasMore: false,
+    isLoading: false,
+    isLoadingMore: false,
+    errorMessage: xssErrorMsg,
+    searchKeyword: xssFolderName,
+    canSelectCurrentFolder: false
+  });
+
+  const errListHtml = mockDoc.getElementById('folderBrowserList').innerHTML;
+  const searchCrumbHtml = mockDoc.getElementById('folderBreadcrumbs').innerHTML;
+  assert.strictEqual(errListHtml.includes('<svg onload'), false, 'エラーメッセージ内の <svg onload> がエスケープされること');
+  assert.strictEqual(searchCrumbHtml.includes('<img'), false, '検索語表示の <img> がエスケープされること');
+});
+
+testCase('ADV-INJ-002', 'searchFolders クエリインジェクション無害化と listSubfolders 不正 ID 拒否 (INVALID_INPUT)', async () => {
+  const capturedUrls = [];
+  const client = DriveApi.createDriveApiClient({
+    getAccessToken: () => 'tok-test',
+    fetchImpl: async (url) => {
+      capturedUrls.push(url);
+      return createMockResponse(200, { files: [] });
+    }
+  });
+
+  const injPayload = "' or 1=1 \\\n\r";
+  const searchRes = await client.searchFolders({ keyword: injPayload });
+  assert.strictEqual(searchRes.success, true);
+  const q = new URL(capturedUrls[0]).searchParams.get('q');
+  assert.ok(q.includes("name contains '\\' or 1=1 \\\\'"));
+  assert.strictEqual(/[\r\n]/.test(q), false);
+
+  const badParentRes = await client.listSubfolders({ space: 'MY_DRIVE', parentId: "abc' or '1'='1" });
+  assert.strictEqual(badParentRes.success, false);
+  assert.strictEqual(badParentRes.errorCode, 'INVALID_INPUT');
+
+  const badDriveRes = await client.listSubfolders({ space: 'SHARED_DRIVES', driveId: 'drv;drop' });
+  assert.strictEqual(badDriveRes.success, false);
+  assert.strictEqual(badDriveRes.errorCode, 'INVALID_INPUT');
+});
+
+testCase('ADV-CON-005', 'フォルダブラウザ連続操作レースコンディションとモーダル閉鎖後の遅延応答破棄', async () => {
+  const store = createMemoryStorage();
+  store.set(STORAGE_KEYS.APP_CONFIG, JSON.stringify({ clientId: 'cid-1' }));
+
+  const renderedSnapshots = [];
+  let resolveSlowMyDrive;
+  let resolveSlowSearch;
+
+  const authService = createAuthService({
+    getGoogleOAuth2: () => ({
+      initTokenClient: (cfg) => ({
+        requestAccessToken: () => cfg.callback({ access_token: 'tok-race', expires_in: 3600 })
+      })
+    })
+  });
+
+  const driveApi = DriveApi.createDriveApiClient({
+    getAccessToken: () => authService.getValidToken(),
+    fetchImpl: (url) => {
+      if (url.includes('/drive/v3/drives')) {
+        return Promise.resolve(createMockResponse(200, {
+          drives: [{ id: 'drv_latest', name: 'Latest Shared Drive' }]
+        }));
+      }
+      const q = new URL(url).searchParams.get('q') || '';
+      if (q.includes("'root' in parents")) {
+        return new Promise((resolve) => {
+          resolveSlowMyDrive = () => resolve(createMockResponse(200, {
+            files: [{ id: 'stale_my_drive', name: 'Stale MyDrive', driveId: '' }]
+          }));
+        });
+      }
+      if (q.includes("name contains 'stale'")) {
+        return new Promise((resolve) => {
+          resolveSlowSearch = () => resolve(createMockResponse(200, {
+            files: [{ id: 'stale_search', name: 'Stale Search', driveId: '' }]
+          }));
+        });
+      }
+      return Promise.resolve(createMockResponse(200, { files: [] }));
+    }
+  });
+
+  const ui = createNoopUi({
+    openFolderSelectorModal: () => {},
+    closeFolderSelectorModal: () => {},
+    switchFolderModalTab: () => {},
+    setPickerTriggerVisible: () => {},
+    renderFolderBrowserState: (viewState) => {
+      if (!viewState.isLoading) {
+        renderedSnapshots.push(viewState);
+      }
+    }
+  });
+
+  const controller = createAppController({
+    configProvider: AppConfigProvider,
+    storage: store,
+    storageKeys: STORAGE_KEYS,
+    folderResolver: FolderResolver,
+    authService,
+    driveApi,
+    pickerService: createPickerService({ getGapi: () => null, getGooglePicker: () => null }),
+    ui
+  });
+
+  controller.init();
+  await authService.signIn();
+  await new Promise((r) => setTimeout(r, 15));
+
+  // 1) MY_DRIVE 遅延中に SHARED_DRIVES へ切り替え -> 古い MY_DRIVE 応答が上書きしないこと
+  const slowMyPromise = controller.openFolderSelection();
+  await controller.switchFolderBrowserSpace('SHARED_DRIVES');
+  resolveSlowMyDrive();
+  await slowMyPromise;
+
+  assert.strictEqual(controller.getFolderBrowserState().space, 'SHARED_DRIVES');
+  assert.strictEqual(controller.getFolderBrowserState().items[0].id, 'drv_latest');
+  assert.strictEqual(renderedSnapshots[renderedSnapshots.length - 1].items[0].id, 'drv_latest');
+
+  // 2) 検索リクエスト中にモーダルを閉じた後、遅延応答が到着しても UI を更新しないこと
+  const countBeforeClose = renderedSnapshots.length;
+  const slowSearchPromise = controller.searchBrowserFolders('stale');
+  controller.closeFolderModal();
+  resolveSlowSearch();
+  await slowSearchPromise;
+
+  assert.strictEqual(renderedSnapshots.length, countBeforeClose, 'モーダル閉鎖後の遅延応答で UI が更新されないこと');
+});
+
+testCase('ADV-REC-003', 'フォルダブラウズ中の 401 / 429 / 500 発生時に既存の currentFolderId と LAST_FOLDER_ID が保持されること', async () => {
+  const statuses = [401, 429, 500];
+
+  for (const status of statuses) {
+    const store = createMemoryStorage();
+    store.set(STORAGE_KEYS.APP_CONFIG, JSON.stringify({ clientId: 'cid-1', defaultFolderId: 'active_folder' }));
+    store.set(STORAGE_KEYS.LAST_FOLDER_ID, 'active_folder');
+
+    const authService = createAuthService({
+      getGoogleOAuth2: () => ({
+        initTokenClient: (cfg) => ({
+          requestAccessToken: () => cfg.callback({ access_token: 'tok-1', expires_in: 3600 })
+        })
+      })
+    });
+
+    let failBrowse = false;
+    const driveApi = DriveApi.createDriveApiClient({
+      getAccessToken: () => authService.getValidToken(),
+      fetchImpl: async (url) => {
+        if (url.includes('/files/active_folder?')) {
+          return createMockResponse(200, { id: 'active_folder', name: 'Active', mimeType: 'application/vnd.google-apps.folder', trashed: false });
+        }
+        if (failBrowse) {
+          const parsedQ = new URL(url).searchParams.get('q') || '';
+          if (parsedQ.includes("mimeType = 'application/vnd.google-apps.folder'")) {
+            return createMockResponse(status, { error: { message: 'Browse err ' + status } });
+          }
+        }
+        return createMockResponse(200, { files: [] });
+      }
+    });
+
+    let modalClosedCount = 0;
+    const controller = createAppController({
+      configProvider: AppConfigProvider,
+      storage: store,
+      storageKeys: STORAGE_KEYS,
+      folderResolver: FolderResolver,
+      authService,
+      driveApi,
+      pickerService: createPickerService({ getGapi: () => null, getGooglePicker: () => null }),
+      ui: createNoopUi({
+        openFolderSelectorModal: () => {},
+        closeFolderSelectorModal: () => { modalClosedCount++; },
+        switchFolderModalTab: () => {},
+        setPickerTriggerVisible: () => {},
+        renderFolderBrowserState: () => {}
+      })
+    });
+
+    controller.init();
+    await authService.signIn();
+    await new Promise((r) => setTimeout(r, 15));
+    assert.strictEqual(controller.getCurrentFolderId(), 'active_folder');
+
+    failBrowse = true;
+    await controller.openFolderSelection();
+
+    assert.strictEqual(controller.getCurrentFolderId(), 'active_folder', `HTTP ${status} 時も currentFolderId が保持されること`);
+    assert.strictEqual(store.get(STORAGE_KEYS.LAST_FOLDER_ID), 'active_folder', `HTTP ${status} 時も LAST_FOLDER_ID が保持されること`);
+    if (status === 401) {
+      assert.ok(modalClosedCount >= 1, '401 時は統合モーダルが閉じられること');
+      assert.strictEqual(authService.getState().status, 'EXPIRED');
+    }
+  }
+});
+
+testCase('ADV-CON-006', 'BUG-001回帰: scheduleFolderBrowserSearch デバウンス待機中の loadMore / openItem / confirmCurrent 競合防止', async () => {
+  const store = createMemoryStorage();
+  store.set(STORAGE_KEYS.APP_CONFIG, JSON.stringify({ clientId: 'cid-1' }));
+
+  const capturedQs = [];
+  const authService = createAuthService({
+    getGoogleOAuth2: () => ({
+      initTokenClient: (cfg) => ({
+        requestAccessToken: () => cfg.callback({ access_token: 'tok-debounce', expires_in: 3600 })
+      })
+    })
+  });
+
+  const driveApi = DriveApi.createDriveApiClient({
+    getAccessToken: () => authService.getValidToken(),
+    fetchImpl: async (url) => {
+      if (url.includes('/files/sub_confirm?')) {
+        return createMockResponse(200, { id: 'sub_confirm', name: 'Sub Confirm', mimeType: 'application/vnd.google-apps.folder', trashed: false });
+      }
+      const parsed = new URL(url);
+      const q = parsed.searchParams.get('q') || '';
+      const pageToken = parsed.searchParams.get('pageToken') || '';
+      capturedQs.push({ q, pageToken, corpora: parsed.searchParams.get('corpora') || '' });
+
+      if (q.includes("'root' in parents")) {
+        if (pageToken === 'my_p2') {
+          return createMockResponse(200, {
+            files: [{ id: 'my_f2', name: 'My F2', driveId: '' }]
+          });
+        }
+        return createMockResponse(200, {
+          nextPageToken: 'my_p2',
+          files: [{ id: 'my_f1', name: 'My F1', driveId: '' }]
+        });
+      }
+      if (q.includes("name contains 'foo'")) {
+        return createMockResponse(200, {
+          files: [{ id: 'hit_shared', name: 'Hit Shared', driveId: 'drv_shared_1' }]
+        });
+      }
+      return createMockResponse(200, { files: [] });
+    }
+  });
+
+  const controller = createAppController({
+    configProvider: AppConfigProvider,
+    storage: store,
+    storageKeys: STORAGE_KEYS,
+    folderResolver: FolderResolver,
+    authService,
+    driveApi,
+    pickerService: createPickerService({ getGapi: () => null, getGooglePicker: () => null }),
+    ui: createNoopUi({
+      openFolderSelectorModal: () => {},
+      closeFolderSelectorModal: () => {},
+      switchFolderModalTab: () => {},
+      setPickerTriggerVisible: () => {},
+      renderFolderBrowserState: () => {}
+    })
+  });
+
+  controller.init();
+  await authService.signIn();
+  await new Promise((r) => setTimeout(r, 15));
+
+  // ケース A: マイドライブ直下で検索デバウンス待機中に loadMoreBrowserFolders() -> 検索クエリに化けず my_p2 が取得されること
+  await controller.openFolderSelection();
+  capturedQs.length = 0;
+  controller.scheduleFolderBrowserSearch('foo', 40);
+  assert.strictEqual(controller.getFolderBrowserState().searchKeyword, '', 'タイマー発火前に searchKeyword が書き換わらないこと');
+  await controller.loadMoreBrowserFolders();
+  await new Promise((r) => setTimeout(r, 60));
+
+  assert.strictEqual(capturedQs.length, 1, '保留中の検索デバウンスがキャンセルされ余分な検索が飛ばないこと');
+  assert.ok(capturedQs[0].q.includes("'root' in parents"), 'マイドライブ次ページ取得クエリが維持されること');
+  assert.strictEqual(controller.getFolderBrowserState().items.length, 2);
+
+  // デバウンス自体が正常に発火することも検証
+  controller.scheduleFolderBrowserSearch('foo', 20);
+  await new Promise((r) => setTimeout(r, 40));
+  assert.strictEqual(controller.getFolderBrowserState().searchKeyword, 'foo');
+  assert.strictEqual(controller.getFolderBrowserState().items[0].id, 'hit_shared');
+
+  // ケース B: 検索結果表示中に検索欄を全削除（空文字デバウンス待機）中に検索結果フォルダを開く -> 空間/パンくずが共有ドライブへ正しく遷移すること
+  controller.scheduleFolderBrowserSearch('', 40);
+  await controller.openFolderBrowserItem({ id: 'hit_shared', name: 'Hit Shared', driveId: 'drv_shared_1' });
+  await new Promise((r) => setTimeout(r, 60));
+  assert.strictEqual(controller.getFolderBrowserState().space, 'SHARED_DRIVES');
+  assert.strictEqual(controller.getFolderBrowserState().breadcrumbs[1].driveId, 'drv_shared_1');
+
+  // ケース C: サブ階層表示中に検索デバウンス待機中でも confirmCurrentBrowserFolder が正常確定すること
+  await controller.openFolderSelection();
+  await controller.openFolderBrowserItem({ id: 'sub_confirm', name: 'Sub Confirm', driveId: '' });
+  controller.scheduleFolderBrowserSearch('bar', 40);
+  await controller.confirmCurrentBrowserFolder();
+  await new Promise((r) => setTimeout(r, 60));
+  assert.strictEqual(controller.getCurrentFolderId(), 'sub_confirm');
+});
+
+testCase('ADV-CON-007', 'BUG-003回帰: submitManualFolder 通信中のモーダル閉鎖後に遅延応答が到着しても破棄されること', async () => {
+  const store = createMemoryStorage();
+  store.set(STORAGE_KEYS.APP_CONFIG, JSON.stringify({ clientId: 'cid-1', defaultFolderId: 'initial_ok' }));
+
+  const toastErrors = [];
+  const statuses = [];
+  let resolveDelayedOk;
+  let resolveDelayedErr;
+
+  const authService = createAuthService({
+    getGoogleOAuth2: () => ({
+      initTokenClient: (cfg) => ({
+        requestAccessToken: () => cfg.callback({ access_token: 'tok-manual', expires_in: 3600 })
+      })
+    })
+  });
+
+  const driveApi = DriveApi.createDriveApiClient({
+    getAccessToken: () => authService.getValidToken(),
+    fetchImpl: (url) => {
+      if (url.includes('/files/initial_ok?')) {
+        return Promise.resolve(createMockResponse(200, { id: 'initial_ok', name: 'Initial OK', mimeType: 'application/vnd.google-apps.folder', trashed: false }));
+      }
+      if (url.includes('/files/manual_delayed_ok?')) {
+        return new Promise((resolve) => {
+          resolveDelayedOk = () => resolve(createMockResponse(200, { id: 'manual_delayed_ok', name: 'Delayed OK', mimeType: 'application/vnd.google-apps.folder', trashed: false }));
+        });
+      }
+      if (url.includes('/files/manual_delayed_404?')) {
+        return new Promise((resolve) => {
+          resolveDelayedErr = () => resolve(createMockResponse(404, { error: { message: 'Not Found' } }));
+        });
+      }
+      return Promise.resolve(createMockResponse(200, { files: [] }));
+    }
+  });
+
+  const controller = createAppController({
+    configProvider: AppConfigProvider,
+    storage: store,
+    storageKeys: STORAGE_KEYS,
+    folderResolver: FolderResolver,
+    authService,
+    driveApi,
+    pickerService: createPickerService({ getGapi: () => null, getGooglePicker: () => null }),
+    ui: createNoopUi({
+      openFolderSelectorModal: () => {},
+      closeFolderSelectorModal: () => {},
+      switchFolderModalTab: () => {},
+      setPickerTriggerVisible: () => {},
+      renderFolderBrowserState: () => {},
+      showErrorToast: (t, m) => toastErrors.push({ t, m }),
+      setStatus: (s) => statuses.push(s)
+    })
+  });
+
+  controller.init();
+  await authService.signIn();
+  await new Promise((r) => setTimeout(r, 15));
+  assert.strictEqual(controller.getCurrentFolderId(), 'initial_ok');
+
+  // 1) 成功応答の遅延到着前にモーダルを閉鎖 -> 適用が破棄され initial_ok が維持されること
+  const pOk = controller.submitManualFolder('manual_delayed_ok');
+  controller.closeFolderModal();
+  resolveDelayedOk();
+  const resOk = await pOk;
+  assert.strictEqual(resOk.cancelled, true);
+  assert.strictEqual(controller.getCurrentFolderId(), 'initial_ok');
+  assert.strictEqual(store.get(STORAGE_KEYS.LAST_FOLDER_ID), 'initial_ok');
+
+  // 2) エラー応答の遅延到着前にモーダルを閉鎖 -> トーストやエラー状態が出ないこと
+  const errorsBefore = toastErrors.length;
+  statuses.length = 0;
+  const pErr = controller.submitManualFolder('manual_delayed_404');
+  controller.closeFolderModal();
+  resolveDelayedErr();
+  const resErr = await pErr;
+  assert.strictEqual(resErr.cancelled, true);
+  assert.strictEqual(toastErrors.length, errorsBefore);
+  assert.strictEqual(statuses.includes('エラー'), false);
 });
 
 // ====================================================

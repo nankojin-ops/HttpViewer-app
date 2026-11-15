@@ -286,41 +286,176 @@
 
   </div>
 
-  <!-- 手動フォルダID入力モーダル（Picker未設定・失敗時・手動指定用フォールバック） -->
-  <div id="manualFolderModal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm hidden flex items-center justify-center p-4 z-50">
-    <div class="bg-white rounded-xl shadow-xl max-w-md w-full p-5 sm:p-6">
-      <div class="flex items-center justify-between mb-4">
-        <h3 class="text-base font-bold text-slate-800">フォルダの切り替え</h3>
-        <button id="closeModalBtn" type="button" class="text-slate-400 hover:text-slate-600" aria-label="閉じる">
+  <!-- 統合フォルダ選択モーダル（アプリ内 Drive フォルダブラウザ + ID/URL 直接入力 + Google Picker 任意補助） -->
+  <div id="manualFolderModal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm hidden flex items-center justify-center p-2 sm:p-4 z-50">
+    <div class="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] flex flex-col overflow-hidden">
+      <!-- ヘッダー（固定） -->
+      <div class="flex items-center justify-between px-4 py-3 sm:px-5 sm:py-3.5 border-b border-slate-200 flex-shrink-0">
+        <h3 class="text-sm sm:text-base font-bold text-slate-800">フォルダを選択</h3>
+        <button id="closeModalBtn" type="button" class="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition-colors" aria-label="閉じる">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
           </svg>
         </button>
       </div>
-      <p class="text-xs text-slate-500 mb-4">
-        閲覧したいGoogleドライブのフォルダID、またはフォルダURLを直接入力してください。
-      </p>
-      <input
-        type="text"
-        id="folderIdInput"
-        placeholder="フォルダID または URL を入力"
-        class="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 mb-4"
-      >
-      <div class="flex items-center justify-end gap-2">
+
+      <!-- タブ切替（固定） -->
+      <div class="flex border-b border-slate-200 px-3 sm:px-5 gap-1 sm:gap-2 flex-shrink-0 bg-slate-50/60">
         <button
-          id="cancelModalBtn"
+          id="folderModalTabBrowser"
           type="button"
-          class="px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+          class="flex-1 sm:flex-none text-center whitespace-nowrap text-xs sm:text-sm py-2.5 px-2 sm:px-3 border-b-2 border-blue-600 text-blue-600 font-semibold transition-colors"
         >
-          キャンセル
+          ドライブから選択
         </button>
         <button
-          id="submitFolderBtn"
+          id="folderModalTabManual"
           type="button"
-          class="px-4 py-2 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 rounded-lg transition-colors shadow-sm"
+          class="flex-1 sm:flex-none text-center whitespace-nowrap text-xs sm:text-sm py-2.5 px-2 sm:px-3 border-b-2 border-transparent text-slate-500 hover:text-slate-700 font-medium transition-colors"
         >
-          フォルダを適用
+          ID / URL を直接入力
         </button>
+      </div>
+
+      <!-- タブ1: アプリ内フォルダブラウザ -->
+      <div id="folderBrowserPanel" class="flex-1 min-h-0 flex flex-col overflow-hidden">
+        <!-- 空間切替・検索・パンくず（固定） -->
+        <div class="flex-shrink-0 px-3 sm:px-5 pt-3 pb-2 border-b border-slate-100 space-y-2 bg-white">
+          <div class="grid grid-cols-3 gap-1.5">
+            <button
+              id="folderSpaceMyDriveBtn"
+              type="button"
+              class="text-[11px] sm:text-xs font-medium py-1.5 px-1.5 rounded-lg border bg-blue-600 text-white border-blue-600 shadow-sm truncate transition-colors"
+            >
+              マイドライブ
+            </button>
+            <button
+              id="folderSpaceSharedDrivesBtn"
+              type="button"
+              class="text-[11px] sm:text-xs font-medium py-1.5 px-1.5 rounded-lg border bg-white text-slate-600 border-slate-200 hover:bg-slate-50 truncate transition-colors"
+            >
+              共有ドライブ
+            </button>
+            <button
+              id="folderSpaceSharedWithMeBtn"
+              type="button"
+              class="text-[11px] sm:text-xs font-medium py-1.5 px-1.5 rounded-lg border bg-white text-slate-600 border-slate-200 hover:bg-slate-50 truncate transition-colors"
+            >
+              共有アイテム
+            </button>
+          </div>
+
+          <div class="flex items-center gap-1.5">
+            <div class="relative flex-1 min-w-0">
+              <div class="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-slate-400">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+              </div>
+              <input
+                type="text"
+                id="folderSearchInput"
+                placeholder="フォルダ名で検索..."
+                class="w-full pl-8 pr-8 py-1.5 text-xs sm:text-sm bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              >
+              <button
+                id="clearFolderSearchBtn"
+                type="button"
+                class="hidden absolute inset-y-0 right-0 pr-2.5 flex items-center text-slate-400 hover:text-slate-600"
+                title="検索をクリア"
+                aria-label="フォルダ検索をクリア"
+              >
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <button
+              id="folderSearchSubmitBtn"
+              type="button"
+              class="px-2.5 sm:px-3 py-1.5 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg transition-colors flex-shrink-0 whitespace-nowrap"
+            >
+              検索
+            </button>
+          </div>
+
+          <nav id="folderBreadcrumbs" aria-label="フォルダ階層" class="flex items-center gap-1 overflow-x-auto whitespace-nowrap text-xs text-slate-600 py-0.5">
+            <span class="font-semibold text-slate-800 max-w-[130px] sm:max-w-[200px] truncate flex-shrink-0">マイドライブ</span>
+          </nav>
+        </div>
+
+        <!-- フォルダ一覧リスト（ここだけ内部スクロール） -->
+        <div class="flex-1 min-h-0 overflow-y-auto touch-scroll px-3 sm:px-5 py-2">
+          <div id="folderBrowserList" class="divide-y divide-slate-100">
+            <!-- JS でフォルダ一覧を描画 -->
+          </div>
+          <div id="folderLoadMoreWrap" class="hidden pt-3 pb-1 text-center">
+            <button
+              id="folderLoadMoreBtn"
+              type="button"
+              class="px-4 py-1.5 text-xs font-medium text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              さらに読み込む
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- タブ2: ID / URL 直接入力 -->
+      <div id="folderManualPanel" class="hidden flex-1 min-h-0 overflow-y-auto p-4 sm:p-5">
+        <p class="text-xs text-slate-600 mb-3 leading-relaxed">
+          閲覧したい Google ドライブのフォルダ ID、またはフォルダ URL を直接入力してください。
+        </p>
+        <input
+          type="text"
+          id="folderIdInput"
+          placeholder="フォルダID または URL を入力"
+          class="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 mb-3"
+        >
+        <p class="text-[11px] text-slate-400 leading-relaxed">
+          例: <code class="bg-slate-100 px-1 py-0.5 rounded">1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs7</code> または <code class="bg-slate-100 px-1 py-0.5 rounded break-all">https://drive.google.com/drive/folders/...</code>
+        </p>
+      </div>
+
+      <!-- フッター（固定・モバイル幅 320px 対応で主要操作と補助導線を縦分離） -->
+      <div class="flex-shrink-0 border-t border-slate-200 bg-slate-50 px-3 sm:px-5 py-3 flex flex-col gap-2">
+        <div class="flex items-center justify-end gap-2">
+          <button
+            id="cancelModalBtn"
+            type="button"
+            class="px-3 sm:px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-200/70 rounded-lg transition-colors whitespace-nowrap"
+          >
+            キャンセル
+          </button>
+          <button
+            id="selectCurrentFolderBtn"
+            type="button"
+            disabled
+            class="px-3 sm:px-4 py-2 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 rounded-lg transition-colors shadow-sm whitespace-nowrap opacity-50 cursor-not-allowed"
+          >
+            このフォルダを選択
+          </button>
+          <button
+            id="submitFolderBtn"
+            type="button"
+            class="hidden px-3 sm:px-4 py-2 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 rounded-lg transition-colors shadow-sm whitespace-nowrap"
+          >
+            フォルダを適用
+          </button>
+        </div>
+
+        <div id="openGooglePickerWrap" class="hidden pt-2 border-t border-slate-200/80 flex items-center justify-start">
+          <button
+            id="openGooglePickerBtn"
+            type="button"
+            class="text-xs text-slate-500 hover:text-blue-600 py-1 px-1.5 rounded transition-colors inline-flex items-center gap-1"
+          >
+            <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+            </svg>
+            <span>Google Picker で開く（補助）</span>
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -371,7 +506,7 @@
             placeholder="AIza..."
             class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
-          <p class="mt-1 text-[11px] text-slate-400">未設定でも「手動フォルダ入力モーダル」により問題なく利用できます。</p>
+          <p class="mt-1 text-[11px] text-slate-400">未設定でも「アプリ内フォルダブラウザ」および「ID / URL 直接入力」により問題なく利用できます。</p>
         </div>
 
         <div>
